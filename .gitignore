@@ -1,0 +1,21 @@
+.build/
+dist/
+.DS_Store
+.swiftpm/
+xcuserdata/
+*.xcuserstate
+*.noindex/
+*.app/
+
+# Local credentials and private fixtures
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.aiff
+*.wav
+*.m4a
+*.mp3
