@@ -32,12 +32,27 @@ public struct ScriptTracker: Sendable {
     private let normalizedScript: [String]
     private var previousTranscript: [String] = []
     private var consumedTranscriptCount = 0
+    private var recoveryTranscriptCount = 0
+    private var recoveryReference: [String] = []
     private var previousConfidence: Double = 0
 
     private static let contextLength = 18
     private static let batchSize = 8
     private static let maximumForwardSearch = 32
     private static let maximumSkippedWords = 8
+    private static let recoverySearchLength = 320
+    private static let recoveryMinimumMatches = 6
+    // Function words alone are weak evidence for a distant jump, even when a
+    // recognizer repeats a familiar phrase verbatim during an aside.
+    private static let commonWords: Set<String> = [
+        "a", "an", "and", "are", "as", "at", "be", "been", "but", "by", "can",
+        "could", "did", "do", "does", "for", "from", "had", "has", "have", "he",
+        "her", "here", "him", "his", "how", "i", "if", "in", "is", "it", "its",
+        "me", "my", "not", "of", "on", "or", "our", "she", "so", "some", "that",
+        "the", "their", "them", "then", "there", "these", "they", "this", "those",
+        "to", "us", "was", "we", "were", "what", "when", "which", "who", "will",
+        "with", "would", "you", "your"
+    ]
 
     public init(script: String) {
         words = Self.tokenize(script)
@@ -52,6 +67,7 @@ public struct ScriptTracker: Sendable {
 
         let initialPosition = position
         let previousCount = previousTranscript.count
+        adjustRecoveryWatermark(for: tokens)
         previousTranscript = tokens
         guard position < words.count, tokens.count > consumedTranscriptCount else {
             previousConfidence = 0
@@ -63,9 +79,17 @@ public struct ScriptTracker: Sendable {
         var end = min(tokens.count, max(consumedTranscriptCount, previousCount) + Self.batchSize)
         var confidence: Double = 0
         while true {
-            if let match = bestMatch(in: tokens, endingAt: end) {
+            let nearby = bestMatch(in: tokens, endingAt: end)
+            // A few incidental nearby words must not conceal a strong match to
+            // a later sentence. Normal, well-supported reading stays on the
+            // inexpensive local path.
+            let recovery = (nearby?.newMatches ?? 0) < Self.recoveryMinimumMatches
+                ? recoveryMatch(in: tokens, endingAt: end) : nil
+            if let match = recovery ?? nearby {
                 position = match.position
                 consumedTranscriptCount = match.transcriptEnd
+                recoveryTranscriptCount = max(recoveryTranscriptCount, match.transcriptEnd)
+                if tokens.count >= recoveryTranscriptCount { recoveryReference = tokens }
                 confidence = match.confidence
             }
             if end == tokens.count || position == words.count { break }
@@ -81,6 +105,8 @@ public struct ScriptTracker: Sendable {
     public mutating func seek(to index: Int) {
         position = min(max(0, index), words.count)
         consumedTranscriptCount = previousTranscript.count
+        recoveryTranscriptCount = consumedTranscriptCount
+        recoveryReference = previousTranscript
         previousConfidence = 0
     }
 
@@ -88,7 +114,47 @@ public struct ScriptTracker: Sendable {
     public mutating func resetTranscript() {
         previousTranscript = []
         consumedTranscriptCount = 0
+        recoveryTranscriptCount = 0
+        recoveryReference = []
         previousConfidence = 0
+    }
+
+    private mutating func adjustRecoveryWatermark(for tokens: [String]) {
+        // Distant recovery uses an extra conservative boundary. Keep ordinary
+        // nearby tracking unchanged: revised words and genuinely new speech can
+        // arrive together, and an uncertain revision must not stall that path.
+        // Revisions can insert words before the watermark. Align the consumed
+        // tail with the new hypothesis so old speech does not become fresh just
+        // because its index grew. Prefer the earliest equally good boundary:
+        // an appended repeated phrase must remain new speech, not a revision.
+        // Truncations retain the high-water mark until the transcript catches up.
+        guard recoveryTranscriptCount > 0,
+              recoveryTranscriptCount <= recoveryReference.count else { return }
+        var prefix = 0
+        while prefix < min(recoveryReference.count, tokens.count),
+              recoveryReference[prefix] == tokens[prefix] { prefix += 1 }
+        guard prefix < recoveryTranscriptCount else { return }
+        let start = max(prefix, recoveryTranscriptCount - Self.contextLength)
+        let oldCount = recoveryTranscriptCount - start
+        let newCount = min(tokens.count, recoveryTranscriptCount + Self.contextLength) - start
+        guard newCount > 0 else { return }
+        var previousRow = (0...newCount).map { -Double($0) * 1.35 }
+        for oldOffset in 1...oldCount {
+            var row = [Double](repeating: 0, count: newCount + 1)
+            row[0] = -Double(oldOffset) * 1.5
+            for newOffset in 1...newCount {
+                let same = recoveryReference[start + oldOffset - 1] == tokens[start + newOffset - 1]
+                row[newOffset] = max(previousRow[newOffset - 1] + (same ? 3 : -2.4),
+                    previousRow[newOffset] - 1.5, row[newOffset - 1] - 1.35)
+            }
+            previousRow = row
+        }
+        var bestEnd = 0
+        for end in 1...newCount where previousRow[end] > previousRow[bestEnd] + 0.001 {
+            bestEnd = end
+        }
+        recoveryTranscriptCount = max(recoveryTranscriptCount, start + bestEnd)
+        if tokens.count >= recoveryTranscriptCount { recoveryReference = tokens }
     }
 
     private static func tokenize(_ text: String) -> [ScriptWord] {
@@ -112,6 +178,7 @@ public struct ScriptTracker: Sendable {
         let transcriptEnd: Int
         let confidence: Double
         let score: Double
+        let newMatches: Int
     }
 
     private struct Cell {
@@ -123,6 +190,7 @@ public struct ScriptTracker: Sendable {
         var replaced = 0
         var newMatches = 0
         var firstScript = -1
+        var contentMask: UInt32 = 0
         var lastScript = -1
         var lastSpeech = -1
     }
@@ -208,12 +276,88 @@ public struct ScriptTracker: Sendable {
                 // Equal repeated phrases choose the nearest forward occurrence.
                 let score = cell.score - Double(max(0, cell.firstScript - position)) * 0.3 - Double(max(0, omitted)) * 0.1
                 if best == nil || score > best!.score + 0.001 || (abs(score - best!.score) < 0.001 && target < best!.position) {
-                    best = Match(position: target, transcriptEnd: cell.lastSpeech + 1, confidence: confidence, score: score)
+                    best = Match(position: target, transcriptEnd: cell.lastSpeech + 1, confidence: confidence, score: score, newMatches: cell.newMatches)
                 }
             }
             previousRow = row
         }
         return best
+    }
+
+    private func recoveryMatch(in tokens: [String], endingAt end: Int) -> Match? {
+        // Recovery never borrows already consumed speech. Otherwise a repeated
+        // line elsewhere in the script could replay an earlier utterance.
+        let speechStart = max(recoveryTranscriptCount, end - Self.contextLength)
+        let speechCount = end - speechStart
+        guard speechCount >= Self.recoveryMinimumMatches else { return nil }
+        let scriptEnd = min(words.count, position + Self.recoverySearchLength)
+        let scriptCount = scriptEnd - position
+        guard scriptCount >= Self.recoveryMinimumMatches else { return nil }
+
+        var previousRow = [Cell](repeating: Cell(), count: scriptCount + 1)
+        var candidates: [(match: Match, start: Int)] = []
+        var contentBits: [String: UInt32] = [:]
+        for token in tokens[speechStart..<end] where token.count >= 3 && !Self.commonWords.contains(token) {
+            if contentBits[token] == nil { contentBits[token] = 1 << contentBits.count }
+        }
+        for speechOffset in 1...speechCount {
+            var row = [Cell](repeating: Cell(), count: scriptCount + 1)
+            let speechIndex = speechStart + speechOffset - 1
+            for scriptOffset in 1...scriptCount {
+                let scriptIndex = position + scriptOffset - 1
+                let similarity = Self.similarity(tokens[speechIndex], normalizedScript[scriptIndex])
+                var diagonal = previousRow[scriptOffset - 1]
+                if similarity > 0 {
+                    diagonal.score += similarity == 1 ? 3 : 2.2
+                    if similarity == 1 { diagonal.exact += 1 } else { diagonal.approximate += 1 }
+                    if diagonal.firstScript < 0 { diagonal.firstScript = scriptIndex }
+                    diagonal.lastScript = scriptIndex
+                    diagonal.lastSpeech = speechIndex
+                    diagonal.newMatches += 1
+                    if similarity == 1 { diagonal.contentMask |= contentBits[tokens[speechIndex]] ?? 0 }
+                } else {
+                    diagonal.score -= 2.4
+                    diagonal.replaced += 1
+                }
+                var insertion = previousRow[scriptOffset]
+                insertion.score -= 1.35
+                insertion.inserted += 1
+                var deletion = row[scriptOffset - 1]
+                deletion.score -= 1.5
+                deletion.deleted += 1
+                var cell = diagonal
+                if insertion.score > cell.score { cell = insertion }
+                if deletion.score > cell.score { cell = deletion }
+                if cell.score <= 0 { cell = Cell() }
+                row[scriptOffset] = cell
+
+                guard speechOffset == speechCount,
+                      cell.lastScript == scriptIndex,
+                      cell.lastSpeech >= end - 2,
+                      cell.newMatches >= Self.recoveryMinimumMatches,
+                      cell.exact >= 5 else { continue }
+                let weightedMatches = Double(cell.exact) + 0.8 * Double(cell.approximate)
+                let total = Double(cell.exact + cell.approximate + cell.inserted + cell.replaced + cell.deleted)
+                let confidence = total > 0 ? weightedMatches / total : 0
+                guard confidence >= 0.8, cell.contentMask.nonzeroBitCount >= 3 else { continue }
+                candidates.append((Match(position: scriptIndex + 1,
+                    transcriptEnd: cell.lastSpeech + 1, confidence: confidence,
+                    score: cell.score, newMatches: cell.newMatches), cell.firstScript))
+            }
+            previousRow = row
+        }
+        candidates.sort { $0.match.score > $1.match.score }
+        guard let best = candidates.first else { return nil }
+        // Include nearby occurrences in ambiguity checking. An aside that quotes
+        // a refrain must not jump to an arbitrary later copy of that refrain.
+        if candidates.dropFirst().contains(where: {
+            $0.start != best.start && $0.match.position != best.match.position &&
+            best.match.score - $0.match.score < 3
+        }) { return nil }
+        // Leave small skips to the precise local matcher. A distant recovery
+        // needs its own stronger evidence and no distance-based tie breaking.
+        guard best.match.position - position - best.match.newMatches > Self.maximumSkippedWords else { return nil }
+        return best.match
     }
 
     private static func similarity(_ lhs: String, _ rhs: String) -> Double {

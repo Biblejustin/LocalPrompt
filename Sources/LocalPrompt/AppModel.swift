@@ -46,6 +46,7 @@ final class AppModel: ObservableObject {
     @Published var matchConfidence = 0.0
     @Published var documentError: String?
     private var tracker: ScriptTracker
+    private let readingActivity = ReadingActivity()
     private var subscriptions = Set<AnyCancellable>()
     private var lastTick = Date()
     private var wordFraction = 0.0
@@ -63,6 +64,18 @@ final class AppModel: ObservableObject {
             self.position = update.position
             self.matchConfidence = update.confidence
         }.store(in: &subscriptions)
+        // Use the published values: @Published sends before its stored value changes.
+        // Silence and ad-libs still count as reading; model preparation does not.
+        speech.$isRunning.combineLatest($timedRunning)
+            .map { $0 || $1 }
+            .removeDuplicates()
+            .sink { [weak self] active in self?.readingActivity.setActive(active) }
+            .store(in: &subscriptions)
+        // AppDelegate also terminates after the last window closes. Fullscreen,
+        // hiding, and minimizing do not end a reading session.
+        NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)
+            .sink { [weak self] _ in self?.stop() }
+            .store(in: &subscriptions)
     }
 
     var words: [ScriptWord] { tracker.words }

@@ -22,6 +22,8 @@ Open LocalPrompt from Applications (local builds install into `~/Applications/Lo
 - Speech follows rendered words. Hidden link URLs and generated list numbers are excluded from tracking; clicking and highlighting use the rendered text positions.
 - Your current draft and reading preferences save locally between launches.
 - Use **Voice follow** for speech-driven scrolling or **Steady pace** for timed scrolling.
+- While either mode is running, LocalPrompt keeps the display awake, including during pauses in your speech and ad-libs. Pausing playback, finishing the script, or quitting releases the sleep protection. Your Mac's normal sleep settings stay unchanged.
+- After a skipped sentence, voice following can recover within the next 320 script words when it hears a strong, distinctive phrase. Short or ambiguous phrases hold your place until there is enough evidence; clicking a word still lets you jump explicitly.
 - Click a word to jump there. Use the transport buttons to rewind or move ten words.
 - The active reading line stays near the top of the prompter, keeping your eyes closer to your audience.
 - Fullscreen hides the header, editor, status, progress, and playback controls. Text starts at the top edge. **⌃⌘F** toggles fullscreen; **Esc** exits and restores controls. **⌘Return** starts/pauses while fullscreen; word navigation shortcuts still work. A speech error returns to the controls so its message is visible.
@@ -64,7 +66,7 @@ Core tests exercise partial transcript revisions, repeated phrases, omitted word
 
 ## First-build scope
 
-Voice following uses conservative nearby phrase alignment. It holds when speech cannot be confidently matched, and accepts short skips. Large jumps, repeated passages, unusually pronounced names, and substantial paraphrasing may need a click to resynchronize. This is an independently implemented prototype, not PromptSmart's proprietary VoiceTrack engine. Live microphone behavior should be tried with your microphone and speaking style before using it for a recording or live event.
+Voice following uses nearby phrase alignment with a bounded forward recovery search. It holds when speech cannot be confidently matched. Jumps beyond the recovery window, repeated passages, unusually pronounced names, and substantial paraphrasing may need a click to resynchronize. This is an independently implemented prototype, not PromptSmart's proprietary VoiceTrack engine. Live microphone behavior should be tried with your microphone and speaking style before using it for a recording or live event.
 
 This version has one autosaved draft, text/RTF import, and the main prompter window. PDF/DOCX import, script libraries, remote control, camera recording, and a dedicated second-display output are not included.
 
