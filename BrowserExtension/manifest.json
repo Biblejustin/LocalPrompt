@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "LocalPrompt Slides",
+  "version": "0.4.0.2",
+  "description": "Connect one Google Slides slideshow to LocalPrompt on this Mac.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAo84739dGZlOx7b9mZr0exKrXmyWLFAblveYBt2pjf+dKUM/jOFrJ34QcvIXeycpCFcGeC4x9+9YnUXL+40EyFUAuSvzCQAIJNo8uQonztaS8uf3YtUHH61g4BBW2QTKcjJOez83zUX3KuhujYK8mpre963JKMtvHQQFyk6UILnLD55iHFHrSfjqj6K50Qwji/9+v/hzp5hxQoIX4F8wDIspuJRZFG3mcIXlrayXQri3mxLevXIgDvI1XQRaAIskIQHat+nXtLgmEwoVPHAf2eO/j/pE8dRbdRV36ylt4sW+utkaksf+X82tML6efAiSTtCI50X3DioLPJJNwyCjBPwIDAQAB",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "nativeMessaging"
+  ],
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "LocalPrompt Slides",
+    "default_popup": "popup.html"
+  }
+}

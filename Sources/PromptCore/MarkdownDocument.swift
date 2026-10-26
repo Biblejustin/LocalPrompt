@@ -43,15 +43,19 @@ public struct MarkdownDocument: Equatable, Sendable {
     /// This keeps speech matching and text-view highlighting in one coordinate space.
     public let trackingText: String
     public let runs: [MarkdownRun]
+    /// Silent actions positioned after the preceding rendered spoken words.
+    public let slideCues: [SlideCue]
 
     public init(source: String) {
+        let prepared = Self.prepareCues(in: source)
+        let renderingSource = prepared.source
         guard let parsed = try? AttributedString(
-            markdown: source,
+            markdown: renderingSource,
             options: .init(interpretedSyntax: .full, failurePolicy: .throwError, appliesSourcePositionAttributes: true)
         ) else {
-            text = source
-            trackingText = source
-            runs = source.isEmpty ? [] : [MarkdownRun(range: NSRange(location: 0, length: source.utf16.count))]
+            var builder = Builder()
+            builder.append(renderingSource, block: Block(nil))
+            self.init(builder: builder, markers: prepared.markers)
             return
         }
 
@@ -79,8 +83,8 @@ public struct MarkdownDocument: Equatable, Sendable {
             // accept it only when its characters agree with the full parse.
             if run.link != nil,
                let position = run.markdownSourcePosition,
-               let sourceRange = Range(position, in: source),
-               let label = try? AttributedString(markdown: String(source[sourceRange]), options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)),
+               let sourceRange = Range(position, in: renderingSource),
+               let label = try? AttributedString(markdown: String(renderingSource[sourceRange]), options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)),
                String(label.characters) == content {
                 for labelRun in label.runs {
                     builder.append(String(label[labelRun.range].characters), block: block, inline: inline.union(labelRun.inlinePresentationIntent ?? []))
@@ -90,13 +94,59 @@ public struct MarkdownDocument: Equatable, Sendable {
             }
             previousBlock = block
         }
-        text = builder.text
-        trackingText = builder.trackingText
-        runs = builder.runs
+        self.init(builder: builder, markers: prepared.markers)
+    }
+
+    private init(builder: Builder, markers: [String]) {
+        let result = builder.removingCues(markers)
+        text = result.builder.text
+        trackingText = result.builder.trackingText
+        runs = result.builder.runs
+        if result.offsets.isEmpty {
+            slideCues = []
+        } else {
+            let words = ScriptTracker(script: result.builder.trackingText).words
+            slideCues = result.offsets.enumerated().map { id, offset in
+                SlideCue(id: id, wordPosition: words.prefix { NSMaxRange($0.range) <= offset }.count)
+            }
+        }
     }
 }
 
 private extension MarkdownDocument {
+    static func prepareCues(in source: String) -> (source: String, markers: [String]) {
+        guard source.contains("[[next-slide]]") else { return (source, []) }
+        let expression = try! NSRegularExpression(pattern: #"(?m)^[ \t]*\[\[next-slide\]\][ \t]*\r?$"#)
+        let candidates = expression.matches(in: source, range: NSRange(location: 0, length: source.utf16.count)).map(\.range)
+        guard !candidates.isEmpty, let parsed = try? AttributedString(
+            markdown: source,
+            options: .init(interpretedSyntax: .full, failurePolicy: .throwError, appliesSourcePositionAttributes: true)
+        ) else { return (source, []) }
+
+        // Native Markdown source ranges distinguish commands from examples in
+        // fenced/indented code, multiline code spans, and link labels.
+        let excluded = parsed.runs.compactMap { run -> NSRange? in
+            let inline = run.inlinePresentationIntent ?? []
+            guard Block(run.presentationIntent).code || !inline.intersection([.code, .inlineHTML, .blockHTML]).isEmpty || run.link != nil,
+                  let position = run.markdownSourcePosition,
+                  let range = Range(position, in: source) else { return nil }
+            return NSRange(range, in: source)
+        }
+        let ranges = candidates.filter { candidate in
+            !excluded.contains { NSIntersectionRange(candidate, $0).length > 0 }
+        }.map { (source as NSString).range(of: "[[next-slide]]", options: [], range: $0) }
+        // Internal markers survive Markdown parsing, then disappear together
+        // with their exact UTF-16 ranges. Avoid collisions with literal text.
+        var prefix = "\u{E000}LocalPromptCue"
+        while source.contains(prefix) { prefix += "X" }
+        let markers = ranges.indices.map { "\(prefix)\($0)\u{E001}" }
+        let prepared = NSMutableString(string: source)
+        for index in ranges.indices.reversed() {
+            prepared.replaceCharacters(in: ranges[index], with: markers[index])
+        }
+        return (prepared as String, markers)
+    }
+
     struct Block {
         let identity: Int?
         var headingLevel: Int?
@@ -160,6 +210,51 @@ private extension MarkdownDocument {
         var trackingText = ""
         var runs: [MarkdownRun] = []
         var utf16Length = 0
+
+        func removingCues(_ markers: [String]) -> (builder: Builder, offsets: [Int]) {
+            guard !markers.isEmpty else { return (self, []) }
+            let source = text as NSString
+            let spoken = trackingText as NSString
+            var removed: [NSRange] = []
+            for marker in markers {
+                var range = source.range(of: marker)
+                guard range.location != NSNotFound else { continue }
+                // Remove the command's following line break, retaining the
+                // separator before it. Leading commands leave no top padding.
+                while NSMaxRange(range) < source.length, source.character(at: NSMaxRange(range)) == 10 {
+                    range.length += 1
+                }
+                removed.append(range)
+            }
+            removed.sort { $0.location < $1.location }
+            var result = Builder()
+            var offsets: [Int] = []
+            var cursor = 0
+            func appendRange(_ range: NSRange, to result: inout Builder) {
+                guard range.length > 0 else { return }
+                let outputStart = result.utf16Length
+                result.text += source.substring(with: range)
+                result.trackingText += spoken.substring(with: range)
+                for run in runs {
+                    let part = NSIntersectionRange(run.range, range)
+                    guard part.length > 0 else { continue }
+                    result.runs.append(MarkdownRun(
+                        range: NSRange(location: outputStart + part.location - range.location, length: part.length),
+                        headingLevel: run.headingLevel, bold: run.bold, italic: run.italic,
+                        code: run.code, quoteDepth: run.quoteDepth, listDepth: run.listDepth,
+                        strikethrough: run.strikethrough
+                    ))
+                }
+                result.utf16Length += range.length
+            }
+            for range in removed {
+                appendRange(NSRange(location: cursor, length: range.location - cursor), to: &result)
+                offsets.append(result.utf16Length)
+                cursor = NSMaxRange(range)
+            }
+            appendRange(NSRange(location: cursor, length: source.length - cursor), to: &result)
+            return (result, offsets)
+        }
 
         mutating func separate(with separator: String, block: Block) {
             // Code blocks already end with a newline. Do not accidentally add

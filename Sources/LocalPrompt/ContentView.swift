@@ -12,6 +12,7 @@ struct ContentView: View {
     @AppStorage("textMargin") private var margin = 65.0
     @AppStorage("mirrorText") private var mirrored = false
     @State private var showEditor = true
+    @State private var showSlideSettings = false
     @StateObject private var windowState = PrompterWindowState()
     private var readingInset: Double { windowState.isFullScreen ? 0 : PrompterTextView.readingLineInset }
     private let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
@@ -40,6 +41,9 @@ struct ContentView: View {
         .onChange(of: speech.errorMessage) { _, message in
             if message != nil { windowState.exitFullScreen() }
         }
+        .onChange(of: model.slideError) { _, message in
+            if message != nil { windowState.exitFullScreen() }
+        }
         .alert("Script", isPresented: Binding(get: { model.documentError != nil }, set: { if !$0 { model.documentError = nil } })) {
             Button("OK") { model.documentError = nil }
         } message: { Text(model.documentError ?? "") }
@@ -57,6 +61,14 @@ struct ContentView: View {
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .foregroundStyle(mint).padding(.horizontal, 12).padding(.vertical, 7)
                 .background(mint.opacity(0.08), in: Capsule())
+            Button {
+                if !showSlideSettings { model.captureSlideCueInsertionPoint() }
+                showSlideSettings.toggle()
+            } label: {
+                Label("Slide cues", systemImage: "rectangle.on.rectangle")
+                    .font(.system(size: 11))
+            }.help("Connect Google Slides in Brave or PowerPoint and set up slide cues")
+                .popover(isPresented: $showSlideSettings) { slideSettings }
             Button { withAnimation(.easeInOut(duration: 0.2)) { showEditor.toggle() } } label: {
                 Image(systemName: "sidebar.left")
             }.help("Show or hide script editor")
@@ -66,6 +78,61 @@ struct ContentView: View {
         }
         .buttonStyle(.borderless)
         .padding(.leading, 85).padding(.trailing, 24).frame(height: 72)
+    }
+
+    private var slideSettings: some View {
+        ScrollView {
+          VStack(alignment: .leading, spacing: 14) {
+            Text("SLIDE CUES").font(.system(size: 11, weight: .semibold, design: .monospaced))
+            Picker("Presentation", selection: Binding(
+                get: { model.presentation.target },
+                set: { model.presentation.target = $0 }
+            )) {
+                ForEach(SlidePresentationController.Target.allCases) { target in
+                    Text(target.rawValue).tag(target)
+                }
+            }.disabled(model.running || speech.isPreparing || model.slideBusy || model.presentation.isBusy)
+            Text("Place this marker on its own line after a slide’s notes. Finishing those words advances the connected slideshow.")
+                .font(.callout).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Text("[[next-slide]]").font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                Spacer()
+                Button("Insert cue", action: model.insertSlideCue)
+                    .disabled(model.running || speech.isPreparing)
+                    .help("Insert at the script cursor, or append when the editor is not focused")
+            }
+            Text("\(model.document.slideCues.count) cue\(model.document.slideCues.count == 1 ? "" : "s") in this script")
+                .font(.caption).foregroundStyle(.secondary)
+            Divider()
+            Text(model.presentation.status).font(.callout).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                if model.presentation.isConnected {
+                    Button("Disconnect", action: model.disconnectSlides)
+                    Button("Test next slide", action: model.testNextSlide)
+                        .disabled(model.running || speech.isPreparing || model.slideBusy || model.presentation.isBusy)
+                } else {
+                    Button(model.presentation.connectLabel, action: model.connectSlides)
+                        .disabled(model.running || speech.isPreparing || model.slideBusy || model.presentation.isBusy)
+                }
+                if model.slideBusy { ProgressView().controlSize(.small) }
+            }
+            if model.presentation.target == .brave {
+                Button("Prepare Brave extension", action: model.presentation.prepareBrave)
+                    .disabled(model.running || speech.isPreparing || model.presentation.isConnected || model.slideBusy || model.presentation.isBusy)
+                Text(model.presentation.setupMessage ?? "First time: prepare the Brave extension, then load its folder at brave://extensions. Start your Google Slides slideshow, click the LocalPrompt Slides extension → Connect this slideshow, then Connect Google Slides here.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text("Use Sidecar as an extended display. Move LocalPrompt to the iPad and leave the slideshow on your Mac or projector. Cues do not switch focus.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Start one PowerPoint slideshow on this Mac, then connect. macOS will ask for Automation access.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Text("Testing moves a real slide. After moving slides manually, align slides and notes, then reconnect. In Brave, select the slideshow again with the extension.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text("Pause cancels queued changes. Seeking sends nothing and does not replay cues. Rewind starts a new cue pass and disconnects; return your deck to its starting slide, then reconnect.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+          }.padding(20)
+        }.frame(width: 420, height: 580)
     }
 
     private var sidebar: some View {
@@ -169,6 +236,15 @@ struct ContentView: View {
                 }.font(.system(size: 12)).foregroundStyle(.orange)
                     .padding(12).background(.orange.opacity(0.07))
             }
+            if let error = model.slideError {
+                HStack {
+                    Image(systemName: "exclamationmark.circle")
+                    Text(error).textSelection(.enabled)
+                    Spacer()
+                    Button("Dismiss") { model.slideError = nil }
+                }.font(.system(size: 12)).foregroundStyle(.orange)
+                    .padding(12).background(.orange.opacity(0.07))
+            }
             HStack(spacing: 18) {
                 VStack(alignment: .leading, spacing: 6) {
                     Picker("Mode", selection: $model.mode) {
@@ -198,7 +274,9 @@ struct ContentView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(canvas).frame(width: 140, height: 40)
                     .background(mint, in: RoundedRectangle(cornerRadius: 10))
-                }.buttonStyle(.plain).disabled(model.wordCount == 0).help("Start / pause · ⌘Return")
+                }.buttonStyle(.plain)
+                    .disabled(model.wordCount == 0 || (!model.running && (model.slideBusy || model.presentation.isBusy)))
+                    .help("Start / pause · ⌘Return")
                 Button { model.seek(model.position + 10) } label: { Image(systemName: "goforward.10") }.accessibilityLabel("Forward 10 words").help("Forward 10 words · ⌘↓")
                 Spacer(minLength: 0)
                 VStack(alignment: .trailing, spacing: 7) {

@@ -1,0 +1,11 @@
+:root { color-scheme: dark; font: 13px -apple-system, BlinkMacSystemFont, sans-serif; color: #e8eeee; background: #0e1217; }
+body { width: 300px; margin: 0; padding: 20px; }
+h1 { margin: 0 0 16px; font-size: 18px; }
+h1 span { display: block; margin-top: 5px; color: #71e6b6; font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; }
+p { line-height: 1.5; }
+#status { padding: 12px; border-radius: 8px; background: #19272a; line-height: 1.5; overflow-wrap: anywhere; }
+#error { color: #ffc28b; }
+button { margin-top: 14px; padding: 10px 14px; width: 100%; border: 0; border-radius: 7px; background: #71e6b6; color: #0e1217; font: inherit; font-weight: 600; cursor: pointer; }
+button:disabled { opacity: .5; cursor: wait; }
+.footnote { font-size: 11px; color: #9bacae; margin-bottom: 0; }
+[hidden] { display: none !important; }

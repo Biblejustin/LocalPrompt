@@ -30,6 +30,46 @@ Open LocalPrompt from Applications (local builds install into `~/Applications/Lo
 - Change font size and margins, mirror text for teleprompter glass, hide the editor, or enter fullscreen.
 - **⌘Return** starts/pauses. **⇧⌘R** rewinds. **⌘↑ / ⌘↓** move ten words. **⌘O** opens a script. **⇧⌘S** exports text.
 
+## Slide cues
+
+LocalPrompt can advance **Google Slides in Brave** or **PowerPoint for Mac**, running on the same Mac. Put `[[next-slide]]` on its own line after the last words for each slide:
+
+```text
+These are the last words for slide one.
+
+[[next-slide]]
+
+Now read the notes for slide two.
+```
+
+Cues stay in the editor and exported source, but disappear from the prompter and word count. Code examples and inline mentions remain ordinary text. In Voice follow, a cue fires when recognition reaches its preceding words; in Steady pace, it fires when timed reading crosses that position. Recognition can lag slightly behind your voice.
+
+### Google Slides in Brave
+
+1. In LocalPrompt, open **Slide cues → Google Slides in Brave → Prepare Brave extension**. Finder opens the extension folder. This also registers the bundled local helper.
+2. Open `brave://extensions`. Enable **Developer mode**, click **Load unpacked**, and select that **BraveExtension** folder. This extension ships with LocalPrompt; it is not yet in the Chrome Web Store.
+3. Open your Google Slides deck in **Slideshow** mode. Use the presentation tab whose URL contains `/present`; the editor and presenter-notes window are deliberately rejected.
+4. Click Brave's Extensions button, open **LocalPrompt Slides**, and click **Connect this slideshow**. This selects that exact tab.
+5. Return to LocalPrompt, align your notes with the displayed slide, and click **Connect Google Slides**. Start reading.
+
+For later reading sessions, open **Slide cues → Connect Google Slides** in LocalPrompt first to start the local bridge. Select your slideshow through the Brave extension, then click **Connect Google Slides** again to confirm its position. Loading or editing notes disconnects slide control, so finish preparing your script before pairing.
+
+For Sidecar, use the iPad as an **extended display**, move LocalPrompt there, and leave Brave's slideshow on your Mac or projector. LocalPrompt stays a Mac app; no iPad app is required. Automatic cues do not activate Brave or send global keyboard shortcuts.
+
+The extension selects the next actual slide through Google Slides' slide picker, skipping unfinished animations on the current slide. It validates the deck, tab instance, slide order, and current position before each command. Reloading/closing the tab, switching decks, or losing the bridge disconnects slide control. Select the slideshow again through the extension before reconnecting. Google's presentation UI can change; unsupported or ambiguous controls stop with an error instead of guessing.
+
+After updating or moving LocalPrompt.app, click **Prepare Brave extension** again, reload LocalPrompt Slides at `brave://extensions`, and reopen your slideshow before reconnecting. To remove this feature, remove the extension in Brave. Its files live under `~/Library/Application Support/LocalPrompt/BraveExtension`; native-host registrations are named `com.biblejustin.localprompt.slides.json` in the Chrome and Brave `NativeMessagingHosts` folders. Brave's macOS native messaging lookup uses the Chrome registration path on current releases.
+
+### PowerPoint for Mac
+
+Start exactly one ordinary PowerPoint slideshow, then choose **Slide cues → PowerPoint for Mac → Connect PowerPoint**. Allow macOS Automation access when prompted. Ordinary shows and slide ranges are supported; custom/named shows are rejected. This adapter remains experimental pending live PowerPoint verification.
+
+### Cue behavior
+
+**Test next slide** moves the real slideshow once. Return it to the matching slide and reconnect before reading. Each cue runs once per pass. Manual seeking does not advance slides or replay crossed cues. **Rewind** rearms cues and disconnects: return the slideshow to its matching starting slide, then reconnect. Editing the script also disconnects. Pause cancels queued changes; an already-sent command may finish once, so check the slide and reconnect. Errors pause reading and commands are never retried automatically. The final slide stays visible.
+
+Rehearse your complete deck before using automatic cues live. LocalPrompt does not import speaker notes; paste or open them as a script. Presentations on another computer and PowerPoint on Windows are not supported.
+
 ## Requirements and privacy
 
 macOS 26 or newer and a Mac supported by Apple's SpeechTranscriber. This first build uses English (US). The microphone follows the macOS default input device; choose it in System Settings → Sound → Input before starting.
@@ -37,6 +77,10 @@ macOS 26 or newer and a Mac supported by Apple's SpeechTranscriber. This first b
 Recognition runs on this Mac. Audio is held in memory for recognition and is not saved by LocalPrompt. The app has no cloud transcription fallback, analytics, or network client. Apple may download a missing language model during setup. Once installed, the model supports offline transcription. macOS manages model storage.
 
 Script draft, title, and preferences are stored in local UserDefaults for `com.biblejustin.localprompt`. Export important scripts as files. Imported documents are read only; export explicitly to write a file.
+
+Optional Brave slide control uses a bundled extension with only `activeTab`, `scripting`, and `nativeMessaging` permissions. It accesses the slideshow tab you explicitly select. Slide identity and position pass through a native helper and a private Unix socket on this Mac. No local web server, cloud relay, API key, microphone access, or full browsing-history permission is required. The extension never receives your script or audio. Google Slides itself remains Google's web service.
+
+Optional PowerPoint control uses local macOS Apple Events to read the active slideshow's identity and position and advance it. macOS manages that permission in System Settings → Privacy & Security → Automation. Neither slide adapter uploads your script or presentation.
 
 If microphone access was denied, enable LocalPrompt in System Settings → Privacy & Security → Microphone. If voice setup fails, the app shows an error and Steady pace remains available.
 
@@ -48,6 +92,7 @@ Requires Apple's Swift 6.2+ toolchain and macOS 26+ SDK. No external Swift packa
 git clone https://github.com/Biblejustin/LocalPrompt.git
 cd LocalPrompt
 swift test
+node --test Tests/BrowserExtensionTests/*.test.mjs
 ./scripts/build-app.sh
 open "$HOME/Applications/LocalPrompt.app"
 ```

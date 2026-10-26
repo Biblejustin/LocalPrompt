@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LocalPrompt Slides</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <h1>LocalPrompt <span>Slide cues</span></h1>
+  <p>Open Google Slides in <strong>Slideshow</strong> mode. Connect this tab, then return to LocalPrompt on your iPad display.</p>
+  <div id="status" role="status" aria-live="polite">Checking connection…</div>
+  <p id="error" role="alert" hidden></p>
+  <button id="connect" type="button">Connect this slideshow</button>
+  <button id="disconnect" type="button" hidden>Disconnect</button>
+  <p class="footnote">Controls only this selected slideshow. Your prompter keeps focus while slides advance.</p>
+  <p class="footnote" id="build">Checking connector build…</p>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

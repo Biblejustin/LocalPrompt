@@ -4,11 +4,17 @@ import PackageDescription
 let package = Package(
     name: "LocalPrompt",
     platforms: [.macOS(.v26)],
-    products: [.executable(name: "LocalPrompt", targets: ["LocalPrompt"])],
+    products: [
+        .executable(name: "LocalPrompt", targets: ["LocalPrompt"]),
+        .executable(name: "LocalPromptSlidesHost", targets: ["LocalPromptSlidesHost"])
+    ],
     targets: [
         .target(name: "PromptCore"),
-        .executableTarget(name: "LocalPrompt", dependencies: ["PromptCore"]),
-        .testTarget(name: "PromptCoreTests", dependencies: ["PromptCore"])
+        .target(name: "SlidesBridgeKit"),
+        .executableTarget(name: "LocalPrompt", dependencies: ["PromptCore", "SlidesBridgeKit"]),
+        .executableTarget(name: "LocalPromptSlidesHost", dependencies: ["SlidesBridgeKit"]),
+        .testTarget(name: "PromptCoreTests", dependencies: ["PromptCore"]),
+        .testTarget(name: "SlidesBridgeKitTests", dependencies: ["SlidesBridgeKit"])
     ],
     swiftLanguageModes: [.v5]
 )

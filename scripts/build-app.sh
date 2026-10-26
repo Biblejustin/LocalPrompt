@@ -11,7 +11,7 @@ if [[ "$MODE" == "--package" ]]; then
     # Keep distributable output independent of local development builds, omit
     # debug info, and remap source paths before they can enter the executable.
     BUILD_ARGS+=(--scratch-path "$PWD/.build/release-package.noindex"
-        --triple arm64-apple-macosx26.0 --product LocalPrompt
+        --triple arm64-apple-macosx26.0
         -debug-info-format none
         -Xswiftc -gnone
         -Xswiftc -file-prefix-map -Xswiftc "$PWD=/LocalPrompt"
@@ -26,6 +26,11 @@ trap 'rm -rf "$STAGING_ROOT"' EXIT
 APP="$STAGING_ROOT/LocalPrompt.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_PATH/LocalPrompt" "$APP/Contents/MacOS/LocalPrompt"
+cp "$BIN_PATH/LocalPromptSlidesHost" "$APP/Contents/MacOS/LocalPromptSlidesHost"
+mkdir -p "$APP/Contents/Resources/BraveExtension"
+for file in manifest.json protocol.js content.js service-worker.js popup.html popup.js popup.css; do
+    cp "BrowserExtension/$file" "$APP/Contents/Resources/BraveExtension/$file"
+done
 swift scripts/CreateIcon.swift .build/LocalPrompt.iconset
 iconutil -c icns .build/LocalPrompt.iconset -o "$APP/Contents/Resources/LocalPrompt.icns"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
@@ -38,16 +43,19 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIconFile</key><string>LocalPrompt</string>
 <key>CFBundleIdentifier</key><string>com.biblejustin.localprompt</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.3.1</string>
-<key>CFBundleVersion</key><string>5</string>
+<key>CFBundleShortVersionString</key><string>0.4.0</string>
+<key>CFBundleVersion</key><string>9</string>
 <key>LSMinimumSystemVersion</key><string>26.0</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSMicrophoneUsageDescription</key><string>LocalPrompt uses your microphone to follow your place in the script. Speech is processed on this Mac.</string>
+<key>NSAppleEventsUsageDescription</key><string>LocalPrompt can optionally advance your PowerPoint slideshow when you finish reading a slide cue.</string>
 </dict></plist>
 PLIST
 if [[ "$MODE" == "--package" ]]; then
     strip -S -x "$APP/Contents/MacOS/LocalPrompt"
+    strip -S -x "$APP/Contents/MacOS/LocalPromptSlidesHost"
 fi
+codesign --force --sign - "$APP/Contents/MacOS/LocalPromptSlidesHost"
 codesign --force --sign - "$APP"
 codesign --verify --deep --strict "$APP"
 if [[ "$MODE" == "--package" ]]; then
@@ -69,9 +77,14 @@ binary = app / 'Contents/MacOS/LocalPrompt'
 allowed = {
     'Contents/Info.plist',
     'Contents/MacOS/LocalPrompt',
+    'Contents/MacOS/LocalPromptSlidesHost',
     'Contents/Resources/LocalPrompt.icns',
     'Contents/_CodeSignature/CodeResources',
 }
+allowed.update(f'Contents/Resources/BraveExtension/{name}' for name in [
+    'manifest.json', 'protocol.js', 'content.js', 'service-worker.js',
+    'popup.html', 'popup.js', 'popup.css',
+])
 actual = {str(p.relative_to(app)) for p in app.rglob('*') if p.is_file()}
 if actual != allowed or any(p.is_symlink() for p in app.rglob('*')):
     raise SystemExit('Unexpected files or links in release bundle')
@@ -82,6 +95,10 @@ arch = subprocess.check_output(['lipo', '-archs', str(binary)], text=True).strip
 build = subprocess.check_output(['xcrun', 'vtool', '-show-build', str(binary)], text=True)
 if arch != 'arm64' or not re.search(r'platform\s+MACOS\b', build) or not re.search(r'minos\s+26\.0\b', build):
     raise SystemExit('Release must be arm64 with a macOS 26.0 deployment target')
+helper = app / 'Contents/MacOS/LocalPromptSlidesHost'
+if subprocess.check_output(['lipo', '-archs', str(helper)], text=True).strip() != 'arm64':
+    raise SystemExit('Native messaging helper must be arm64')
+subprocess.run(['codesign', '--verify', '--strict', str(helper)], check=True)
 private_paths = [str(project).encode(), str(Path.home()).encode(), b'/Users/', b'/private/var/folders/', b'/var/folders/']
 for relative in allowed:
     data = (app / relative).read_bytes()
@@ -112,6 +129,8 @@ restored = extracted / 'LocalPrompt.app'
 subprocess.run(['codesign', '--verify', '--deep', '--strict', str(restored)], check=True)
 if not os.access(restored / 'Contents/MacOS/LocalPrompt', os.X_OK):
     raise SystemExit('Archive lost executable permissions')
+if not os.access(restored / 'Contents/MacOS/LocalPromptSlidesHost', os.X_OK):
+    raise SystemExit('Archive lost helper executable permissions')
 digest = hashlib.sha256(staged_zip.read_bytes()).hexdigest()
 checksum = app.parent / 'SHA256SUMS.txt'
 checksum.write_text(f'{digest}  {archive_name}\n')
@@ -119,7 +138,7 @@ staged_zip.replace(output / archive_name)
 checksum.replace(output / 'SHA256SUMS.txt')
 print(f'Release archive: {output / archive_name}')
 print(f'SHA256: {digest}')
-print('Verified: arm64, macOS 26.0+, ad-hoc signature, exact four-file payload, no private machine paths.')
+print('Verified: arm64, macOS 26.0+, app and helper signatures, exact app/extension payload, no private machine paths.')
 print('Not Developer ID signed or notarized; macOS Gatekeeper may require user approval.')
 PY
     exit 0
