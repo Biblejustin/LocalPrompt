@@ -28,7 +28,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_PATH/LocalPrompt" "$APP/Contents/MacOS/LocalPrompt"
 cp "$BIN_PATH/LocalPromptSlidesHost" "$APP/Contents/MacOS/LocalPromptSlidesHost"
 mkdir -p "$APP/Contents/Resources/BraveExtension"
-for file in manifest.json protocol.js content.js service-worker.js popup.html popup.js popup.css; do
+for file in manifest.json protocol.js native-port.js content.js service-worker.js popup.html popup.js popup.css; do
     cp "BrowserExtension/$file" "$APP/Contents/Resources/BraveExtension/$file"
 done
 swift scripts/CreateIcon.swift .build/LocalPrompt.iconset
@@ -82,7 +82,7 @@ allowed = {
     'Contents/_CodeSignature/CodeResources',
 }
 allowed.update(f'Contents/Resources/BraveExtension/{name}' for name in [
-    'manifest.json', 'protocol.js', 'content.js', 'service-worker.js',
+    'manifest.json', 'protocol.js', 'native-port.js', 'content.js', 'service-worker.js',
     'popup.html', 'popup.js', 'popup.css',
 ])
 actual = {str(p.relative_to(app)) for p in app.rglob('*') if p.is_file()}

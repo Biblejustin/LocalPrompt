@@ -1,4 +1,5 @@
 import AppKit
+import SafariServices
 import SlidesBridgeKit
 import Combine
 
@@ -23,9 +24,18 @@ final class SlidePresentationController: ObservableObject {
     @Published private(set) var setupMessage: String?
     let browser = BrowserPresentationController()
     private let powerpoint = PresentationController()
+    private let safari = SafariRelay()
     private var subscriptions = Set<AnyCancellable>()
+    /// The App Store build bundles a Safari extension alongside Chrome and Brave.
+    let offersSafari = SafariRelay.isBundled
+    @Published private(set) var safariExtensionEnabled: Bool?
 
     init() {
+        if offersSafari {
+            do { try safari.start() }
+            catch { setupMessage = "Safari slide control could not start: \(error.localizedDescription)" }
+            refreshSafariState()
+        }
         browser.objectWillChange.merge(with: powerpoint.objectWillChange)
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &subscriptions)
@@ -81,6 +91,25 @@ final class SlidePresentationController: ObservableObject {
             setupMessage = "In Brave, open brave://extensions, enable Developer mode, choose Load unpacked, and select the BraveExtension folder shown in Finder. If already installed, click Reload instead. Then open your deck → LocalPrompt Slides → Connect this deck. LocalPrompt pairs automatically."
             NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: folder.path)
         } catch { errorMessage = error.localizedDescription }
+    }
+
+    /// Reads whether the user has turned on LocalPrompt Slides in Safari.
+    func refreshSafariState() {
+        guard let identifier = SafariRelay.extensionBundleIdentifier else { return }
+        SFSafariExtensionManager.getStateOfSafariExtension(withIdentifier: identifier) { [weak self] state, _ in
+            let enabled = state?.isEnabled
+            Task { @MainActor in self?.safariExtensionEnabled = enabled }
+        }
+    }
+
+    func openSafariExtensionSettings() {
+        guard let identifier = SafariRelay.extensionBundleIdentifier else { return }
+        SFSafariApplication.showPreferencesForExtension(withIdentifier: identifier) { [weak self] error in
+            Task { @MainActor in
+                if let error { self?.errorMessage = "Could not open Safari settings: \(error.localizedDescription)" }
+                else { self?.setupMessage = "In Safari Settings → Extensions, turn on LocalPrompt Slides and allow it on docs.google.com. Then open your deck in Safari → LocalPrompt Slides → Connect this deck." }
+            }
+        }
     }
 
     private enum ManualSyncError: LocalizedError {

@@ -191,6 +191,17 @@ struct ContentView: View {
                     Text("Open your deck in Brave → LocalPrompt Slides → Connect this deck. Pairing happens automatically here; reading stays paused.")
                         .font(.callout).fixedSize(horizontal: false, vertical: true)
                 }
+                if model.presentation.offersSafari {
+                    HStack {
+                        Button("Safari extension settings…", action: model.presentation.openSafariExtensionSettings)
+                        switch model.presentation.safariExtensionEnabled {
+                        case true?: Label("On in Safari", systemImage: "checkmark.circle").font(.caption).foregroundStyle(.secondary)
+                        case false?: Text("Off in Safari").font(.caption).foregroundStyle(.secondary)
+                        case nil: EmptyView()
+                        }
+                    }
+                    .onAppear(perform: model.presentation.refreshSafariState)
+                }
                 Button("Prepare Brave extension", action: model.presentation.prepareBrave)
                     .disabled(model.running || speech.isPreparing || model.presentation.isConnected || model.slideBusy || model.presentation.isBusy)
                 Text(model.presentation.setupMessage ?? "First time only: prepare the Brave extension, then load its folder at brave://extensions. After an update, prepare again and reload the extension there.")

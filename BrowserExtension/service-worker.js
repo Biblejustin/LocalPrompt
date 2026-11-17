@@ -1,4 +1,5 @@
-import { VERSION, CHANNEL, NATIVE_HOST, presentationID, slideshowSelection, validSnapshot, validateCommand, errorText } from "./protocol.js";
+import { VERSION, CHANNEL, presentationID, slideshowSelection, validSnapshot, validateCommand, errorText } from "./protocol.js";
+import { openNativePort } from "./native-port.js";
 
 const CONNECTOR_BUILD = "0.5.5";
 let connection = null;
@@ -198,7 +199,7 @@ async function connect() {
     if (!validSnapshot(initial.snapshot) || initial.snapshot.deckID !== selection.deckID) throw new Error("Google Slides returned an invalid position.");
     const verifiedTab = await selectedTab(current);
     if (presentationID(verifiedTab.url) !== selection.deckID) throw new Error("The selected tab left its slideshow while connecting.");
-    const port = chrome.runtime.connectNative(NATIVE_HOST);
+    const port = openNativePort(chrome.runtime);
     const target = { tabId: tab.id, session: crypto.randomUUID(), snapshot: initial.snapshot, contentBuild: initial.contentBuild, lastRequestID: 0, commands: Promise.resolve(), port, paired: false };
     connection = target;
     target.handshakeTimer = setTimeout(() => {

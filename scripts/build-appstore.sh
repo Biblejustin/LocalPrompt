@@ -2,6 +2,7 @@
 # Builds the sandboxed Mac App Store edition of LocalPrompt.
 #
 #   TEAM_ID=ABCDE12345 PROVISIONING_PROFILE=~/Downloads/LocalPrompt_MAS.provisionprofile \
+#       SAFARI_PROVISIONING_PROFILE=~/Downloads/LocalPrompt_Safari_MAS.provisionprofile \
 #       ./scripts/build-appstore.sh            # signed .pkg in dist/, ready for Transporter
 #   ./scripts/build-appstore.sh --local-test   # ad-hoc signed, sandboxed copy to run on this Mac
 #
@@ -19,6 +20,8 @@ if [[ "$MODE" == "store" ]]; then
     : "${TEAM_ID:?Set TEAM_ID to your 10-character Apple Developer Team ID}"
     : "${PROVISIONING_PROFILE:?Set PROVISIONING_PROFILE to the Mac App Store provisioning profile for com.biblejustin.localprompt}"
     [[ -f "$PROVISIONING_PROFILE" ]] || { echo "No provisioning profile at $PROVISIONING_PROFILE" >&2; exit 1; }
+    : "${SAFARI_PROVISIONING_PROFILE:?Set SAFARI_PROVISIONING_PROFILE to the Mac App Store provisioning profile for com.biblejustin.localprompt.safari}"
+    [[ -f "$SAFARI_PROVISIONING_PROFILE" ]] || { echo "No provisioning profile at $SAFARI_PROVISIONING_PROFILE" >&2; exit 1; }
     APP_SIGN_IDENTITY="${APP_SIGN_IDENTITY:-Apple Distribution}"
     INSTALLER_SIGN_IDENTITY="${INSTALLER_SIGN_IDENTITY:-3rd Party Mac Developer Installer}"
 else
@@ -49,7 +52,7 @@ mkdir -p "$OUT_ROOT"
 APP="$OUT_ROOT/LocalPrompt.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/BraveExtension"
 cp "$BIN_PATH/LocalPrompt" "$BIN_PATH/LocalPromptSlidesHost" "$APP/Contents/MacOS/"
-for file in manifest.json protocol.js content.js service-worker.js popup.html popup.js popup.css; do
+for file in manifest.json protocol.js native-port.js content.js service-worker.js popup.html popup.js popup.css; do
     cp "BrowserExtension/$file" "$APP/Contents/Resources/BraveExtension/$file"
 done
 cp AppStore/PrivacyInfo.xcprivacy "$APP/Contents/Resources/PrivacyInfo.xcprivacy"
@@ -101,27 +104,88 @@ if [[ "$MODE" == "--local-test" ]]; then
 fi
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
 
-strip -S -x "$APP/Contents/MacOS/LocalPrompt" "$APP/Contents/MacOS/LocalPromptSlidesHost"
+# Safari extension: an app extension whose handler is compiled with the
+# SlidesBridgeKit sources, plus the same web extension files Chrome uses.
+APPEX="$APP/Contents/PlugIns/LocalPrompt Slides.appex"
+mkdir -p "$APPEX/Contents/MacOS" "$APPEX/Contents/Resources"
+swiftc -swift-version 5 -O -gnone -parse-as-library -application-extension \
+    -module-name LocalPromptSafari -target arm64-apple-macosx26.0 \
+    -file-prefix-map "$PWD=/LocalPrompt" -file-prefix-map "$HOME=/User" \
+    AppStore/SafariExtension/SafariWebExtensionHandler.swift Sources/SlidesBridgeKit/*.swift \
+    -framework SafariServices \
+    -Xlinker -e -Xlinker _NSExtensionMain -Xlinker -application_extension \
+    -o "$APPEX/Contents/MacOS/LocalPromptSafari"
+for file in protocol.js native-port.js content.js service-worker.js popup.html popup.js popup.css; do
+    cp "BrowserExtension/$file" "$APPEX/Contents/Resources/$file"
+done
+# The "key" only pins the unpacked Chrome extension's ID; Safari has no use for it.
+python3 - BrowserExtension/manifest.json "$APPEX/Contents/Resources/manifest.json" <<'PY'
+import json, sys
+manifest = json.load(open(sys.argv[1]))
+manifest.pop("key", None)
+json.dump(manifest, open(sys.argv[2], "w"), indent=2)
+PY
+SAFARI_ID="com.biblejustin.localprompt.safari"
+[[ "$MODE" == "--local-test" ]] && SAFARI_ID="com.biblejustin.localprompt.sandboxtest.safari"
+cat > "$APPEX/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleDevelopmentRegion</key><string>en</string>
+<key>CFBundleName</key><string>LocalPrompt Slides</string>
+<key>CFBundleDisplayName</key><string>LocalPrompt Slides</string>
+<key>CFBundleExecutable</key><string>LocalPromptSafari</string>
+<key>CFBundleIdentifier</key><string>$SAFARI_ID</string>
+<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+<key>CFBundlePackageType</key><string>XPC!</string>
+<key>CFBundleShortVersionString</key><string>$VERSION</string>
+<key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
+<key>CFBundleSupportedPlatforms</key><array><string>MacOSX</string></array>
+<key>LSMinimumSystemVersion</key><string>26.0</string>
+<key>NSHumanReadableDescription</key><string>Connect one Google Slides slideshow to LocalPrompt on this Mac.</string>
+<key>NSExtension</key><dict>
+<key>NSExtensionPointIdentifier</key><string>com.apple.Safari.web-extension</string>
+<key>NSExtensionPrincipalClass</key><string>LPSafariWebExtensionHandler</string>
+</dict>
+<key>DTPlatformName</key><string>macosx</string>
+<key>DTPlatformVersion</key><string>$SDK_VERSION</string>
+<key>DTPlatformBuild</key><string>$SDK_BUILD</string>
+<key>DTSDKName</key><string>macosx$SDK_VERSION</string>
+<key>DTSDKBuild</key><string>$SDK_BUILD</string>
+<key>DTXcode</key><string>$DT_XCODE</string>
+<key>DTXcodeBuild</key><string>$XCODE_BUILD</string>
+<key>DTCompiler</key><string>com.apple.compilers.llvm.clang.1_0</string>
+<key>BuildMachineOSBuild</key><string>$(sw_vers -buildVersion)</string>
+</dict></plist>
+PLIST
+plutil -lint "$APPEX/Contents/Info.plist" >/dev/null
+
+strip -S -x "$APP/Contents/MacOS/LocalPrompt" "$APP/Contents/MacOS/LocalPromptSlidesHost" "$APPEX/Contents/MacOS/LocalPromptSafari"
 
 ENTITLEMENTS="$OUT_ROOT/entitlements"
 mkdir -p "$ENTITLEMENTS"
 sed "s/TEAM_ID/$TEAM_ID/g" AppStore/LocalPrompt.entitlements > "$ENTITLEMENTS/app.plist"
 sed "s/TEAM_ID/$TEAM_ID/g" AppStore/LocalPromptSlidesHost.entitlements > "$ENTITLEMENTS/host.plist"
+sed "s/TEAM_ID/$TEAM_ID/g" AppStore/LocalPromptSafari.entitlements > "$ENTITLEMENTS/safari.plist"
 if [[ "$MODE" == "--local-test" ]]; then
     # These two need a provisioning profile; macOS refuses to launch an
     # ad-hoc build that claims them.
-    grep -vE "com\.apple\.(application-identifier|developer\.team-identifier)" "$ENTITLEMENTS/app.plist" > "$ENTITLEMENTS/app-local.plist"
-    mv "$ENTITLEMENTS/app-local.plist" "$ENTITLEMENTS/app.plist"
-    plutil -lint "$ENTITLEMENTS/app.plist" >/dev/null
+    for name in app safari; do
+        grep -vE "com\.apple\.(application-identifier|developer\.team-identifier)" "$ENTITLEMENTS/$name.plist" > "$ENTITLEMENTS/$name-local.plist"
+        mv "$ENTITLEMENTS/$name-local.plist" "$ENTITLEMENTS/$name.plist"
+        plutil -lint "$ENTITLEMENTS/$name.plist" >/dev/null
+    done
 else
     cp "$PROVISIONING_PROFILE" "$APP/Contents/embedded.provisionprofile"
+    cp "$SAFARI_PROVISIONING_PROFILE" "$APPEX/Contents/embedded.provisionprofile"
 fi
 
+codesign --force --sign "$APP_SIGN_IDENTITY" --entitlements "$ENTITLEMENTS/safari.plist" "$APPEX"
 codesign --force --sign "$APP_SIGN_IDENTITY" --entitlements "$ENTITLEMENTS/host.plist" \
     --identifier com.biblejustin.localprompt.slideshost "$APP/Contents/MacOS/LocalPromptSlidesHost"
 codesign --force --sign "$APP_SIGN_IDENTITY" --entitlements "$ENTITLEMENTS/app.plist" "$APP"
 codesign --verify --deep --strict "$APP"
-for binary in "$APP" "$APP/Contents/MacOS/LocalPromptSlidesHost"; do
+for binary in "$APP" "$APP/Contents/MacOS/LocalPromptSlidesHost" "$APPEX"; do
     codesign -d --entitlements - --xml "$binary" 2>/dev/null | grep -q "com.apple.security.app-sandbox" \
         || { echo "Not sandboxed: $binary" >&2; exit 1; }
 done
