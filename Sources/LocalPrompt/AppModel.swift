@@ -22,11 +22,10 @@ final class AppModel: ObservableObject {
     enum Mode: String, CaseIterable { case voice = "Voice follow", timed = "Steady pace" }
     let speech = SpeechController()
     let presentation = SlidePresentationController()
-    let sermonLibrary = SermonLibraryController()
-    let bibleStudyLibrary = SermonLibraryController(kind: .bibleStudies)
-    let mensMeetingLibrary = SermonLibraryController(kind: .mensMeetings)
-    let introductionToBibleLibrary = SermonLibraryController(kind: .introductionToBible)
-    @Published var selectedLibrary: NoteLibraryKind?
+    @Published private(set) var libraries: [NoteLibrary] = []
+    @Published var selectedLibrary: NoteLibrary?
+    @Published var showsLibraryManager = false
+    private var libraryControllers: [String: SermonLibraryController] = [:]
     @Published private(set) var linkedSermon: LinkedSermon?
     @Published private var previousDraft: SavedDraft?
     @Published private(set) var document: MarkdownDocument
@@ -68,6 +67,7 @@ final class AppModel: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        libraries = NoteLibrary.load(from: defaults)
         let draft = defaults.string(forKey: "draftScript") ?? Self.sample
         let source = defaults.data(forKey: "linkedSermon").flatMap { try? JSONDecoder().decode(LinkedSermon.self, from: $0) }
         linkedSermon = source
@@ -545,13 +545,38 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func library(for kind: NoteLibraryKind) -> SermonLibraryController {
-        switch kind {
-        case .sermons: return sermonLibrary
-        case .bibleStudies: return bibleStudyLibrary
-        case .mensMeetings: return mensMeetingLibrary
-        case .introductionToBible: return introductionToBibleLibrary
+    func library(for info: NoteLibrary) -> SermonLibraryController {
+        if let existing = libraryControllers[info.id] { return existing }
+        let controller = SermonLibraryController(library: info, defaults: defaults)
+        libraryControllers[info.id] = controller
+        return controller
+    }
+
+    /// The folder a saved library points at, without creating one for a draft.
+    func folderName(forLibrary id: String) -> String? {
+        guard let info = libraries.first(where: { $0.id == id }) else { return nil }
+        return library(for: info).folderURL?.lastPathComponent
+    }
+
+    /// Closes any open library picker before showing the editor.
+    func editLibraries() {
+        guard selectedLibrary != nil else { showsLibraryManager = true; return }
+        selectedLibrary = nil
+        DispatchQueue.main.async { [weak self] in self?.showsLibraryManager = true }
+    }
+
+    /// Saves the edited list. Removed libraries forget their folder and filter;
+    /// the notes themselves are never touched.
+    func updateLibraries(_ edited: [NoteLibrary]) {
+        let kept = Array(edited.prefix(NoteLibrary.maximumCount))
+        for removed in libraries where !kept.contains(where: { $0.id == removed.id }) {
+            NoteLibrary.forget(removed, in: defaults)
+            libraryControllers[removed.id] = nil
+            if selectedLibrary?.id == removed.id { selectedLibrary = nil }
         }
+        libraries = kept
+        NoteLibrary.save(kept, to: defaults)
+        for info in kept { libraryControllers[info.id]?.update(info) }
     }
 
     func openNote(_ entry: SermonLibraryEntry, from library: SermonLibraryController) -> Bool {

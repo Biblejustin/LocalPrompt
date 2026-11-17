@@ -5,7 +5,7 @@ import SlidesBridgeKit
 // Chromium supplies caller origin as its first argument. This executable has
 // no UI, starts no applications, and never records document/script contents.
 guard CommandLine.arguments.count == 2,
-      CommandLine.arguments[1] == SlidesBridgeIdentity.extensionOrigin else {
+      SlidesBridgeIdentity.allowedOrigins.contains(CommandLine.arguments[1]) else {
     fputs("LocalPrompt slide bridge rejected caller.\n", stderr)
     exit(1)
 }

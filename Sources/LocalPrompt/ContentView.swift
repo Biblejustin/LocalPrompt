@@ -40,8 +40,11 @@ struct ContentView: View {
         .tint(mint)
         .onReceive(timer) { _ in model.tick() }
         .onExitCommand(perform: windowState.isFullScreen ? { windowState.exitFullScreen() } : nil)
-        .sheet(item: $model.selectedLibrary) { kind in
-            SermonLibraryView(model: model, library: model.library(for: kind))
+        .sheet(item: $model.selectedLibrary) { library in
+            SermonLibraryView(model: model, library: model.library(for: library))
+        }
+        .sheet(isPresented: $model.showsLibraryManager) {
+            LibraryManagerView(model: model)
         }
         .alert("Script", isPresented: Binding(get: { model.documentError != nil && model.selectedLibrary == nil }, set: { if !$0 { model.documentError = nil } })) {
             Button("OK") { model.documentError = nil }
@@ -73,18 +76,7 @@ struct ContentView: View {
                     .background(mint.opacity(0.08), in: Capsule())
                     .fixedSize()
             }
-            ForEach(NoteLibraryKind.allCases) { kind in
-                Button { model.selectedLibrary = kind } label: {
-                    if compactLibraries {
-                        Image(systemName: kind.symbol).font(.system(size: 13))
-                            .frame(width: 24, height: 24)
-                    } else {
-                        Label(kind.title, systemImage: kind.symbol).font(.system(size: 11)).fixedSize()
-                    }
-                }.accessibilityLabel(kind.title)
-                    .help("\(kind.title): browse \(kind.pluralNoun) from Obsidian")
-                    .disabled(!model.canReplaceScript)
-            }
+            libraryButtons(compact: compactLibraries)
             Button {
                 if !showSlideSettings { model.captureSlideCueInsertionPoint() }
                 showSlideSettings.toggle()
@@ -99,6 +91,41 @@ struct ContentView: View {
             Button { windowState.toggleFullScreen() } label: {
                 Image(systemName: "arrow.up.left.and.arrow.down.right")
             }.help("Full screen · ⌃⌘F. Esc exits; ⌘Return starts or pauses.")
+        }
+    }
+
+    /// Up to four libraries get their own header button; more share a menu.
+    @ViewBuilder private func libraryButtons(compact: Bool) -> some View {
+        if model.libraries.isEmpty {
+            Button { model.editLibraries() } label: {
+                Label("Add library", systemImage: "plus.rectangle.on.folder").font(.system(size: 11)).fixedSize()
+            }.help("Add a folder of Markdown notes")
+        } else if model.libraries.count <= 4 {
+            ForEach(model.libraries) { library in
+                Button { model.selectedLibrary = library } label: {
+                    if compact {
+                        Image(systemName: library.symbol).font(.system(size: 13))
+                            .frame(width: 24, height: 24)
+                    } else {
+                        Label(library.title, systemImage: library.symbol).font(.system(size: 11)).fixedSize()
+                    }
+                }.accessibilityLabel(library.title)
+                    .help("\(library.title): browse notes in this library. Right-click to edit libraries.")
+                    .disabled(!model.canReplaceScript)
+                    .contextMenu { Button("Edit Libraries…") { model.editLibraries() } }
+            }
+        } else {
+            Menu {
+                ForEach(model.libraries) { library in
+                    Button { model.selectedLibrary = library } label: { Label(library.title, systemImage: library.symbol) }
+                }
+                Divider()
+                Button("Edit Libraries…") { model.editLibraries() }
+            } label: {
+                Label("Libraries", systemImage: "books.vertical").font(.system(size: 11))
+            }.fixedSize()
+                .help("Browse notes in one of your libraries")
+                .disabled(!model.canReplaceScript)
         }
     }
 

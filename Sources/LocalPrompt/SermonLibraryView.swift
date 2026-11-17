@@ -16,27 +16,26 @@ struct SermonLibraryView: View {
 
     private var selectedEntry: SermonLibraryEntry? { matches.first { $0.id == selection } }
     private var hasFilenameFilter: Bool { !library.filenameFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    private var noteNoun: String {
-        library.kind == .bibleStudies ? library.kind.singularTitle : library.kind.singularTitle.lowercased()
-    }
     private var emptyMessage: String {
-        if library.folderURL == nil { return "Choose a folder to see your \(library.kind.pluralNoun)." }
+        if library.folderURL == nil { return "Choose a folder to see the notes in \(library.info.title)." }
         if hasFilenameFilter && library.entries.isEmpty { return "No notes match the filename filter." }
-        if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "No matching \(library.kind.pluralNoun)." }
+        if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "No matching notes." }
         return "No Markdown notes found in this folder."
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Label(library.kind.title, systemImage: library.kind.symbol).font(.title2.weight(.semibold))
+                Label(library.info.title, systemImage: library.info.symbol).font(.title2.weight(.semibold))
                 Spacer()
+                Button("Edit Libraries…") { model.editLibraries() }
+                    .help("Add, rename, reorder or remove libraries")
                 Button("Done") { model.selectedLibrary = nil }.keyboardShortcut(.cancelAction)
             }
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(library.folderURL?.lastPathComponent ?? "Choose a folder for \(library.kind.pluralNoun)").font(.headline)
-                    Text(library.folderURL.map { ($0.path as NSString).abbreviatingWithTildeInPath } ?? "Pick a folder inside your Obsidian vault for \(library.kind.pluralNoun).")
+                    Text(library.folderURL?.lastPathComponent ?? "Choose a folder for \(library.info.title)").font(.headline)
+                    Text(library.folderURL.map { ($0.path as NSString).abbreviatingWithTildeInPath } ?? "Pick a folder of Markdown notes, such as one inside your Obsidian vault.")
                         .font(.caption).foregroundStyle(.secondary).lineLimit(2).textSelection(.enabled)
                 }
                 Spacer()
@@ -53,9 +52,9 @@ struct SermonLibraryView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             HStack {
-                TextField(library.kind.searchPrompt, text: $query)
+                TextField("Search notes or folders", text: $query)
                     .textFieldStyle(.roundedBorder)
-                    .accessibilityLabel("Search \(library.kind.pluralNoun)")
+                    .accessibilityLabel("Search \(library.info.title)")
                 Button(action: library.refresh) { Label("Refresh list", systemImage: "arrow.clockwise") }
                     .disabled(library.folderURL == nil || library.isRefreshing)
             }
@@ -89,14 +88,14 @@ struct SermonLibraryView: View {
             .onChange(of: library.entries) { _, _ in if selectedEntry == nil { selection = nil } }
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("\(matches.count) of \(library.entries.count) \(library.kind.pluralNoun) · newest first").font(.caption)
+                    Text("\(matches.count) of \(library.entries.count) notes · newest first").font(.caption)
                     if hasFilenameFilter {
                         Text("\(library.totalEntryCount) Markdown files in folder").font(.caption2).foregroundStyle(.secondary)
                     }
                     Text("Opens a local copy. Vault notes stay unchanged.").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Open \(noteNoun)") { if let selectedEntry { open(selectedEntry) } }
+                Button("Open note") { if let selectedEntry { open(selectedEntry) } }
                     .keyboardShortcut(.defaultAction)
                     .disabled(selectedEntry == nil || !model.canReplaceScript || library.isRefreshing)
             }
@@ -104,7 +103,7 @@ struct SermonLibraryView: View {
         .padding(22)
         .frame(width: 650, height: 540)
         .onAppear { library.refresh() }
-        .alert(library.kind.title, isPresented: Binding(get: { model.documentError != nil }, set: { if !$0 { model.documentError = nil } })) {
+        .alert(library.info.title, isPresented: Binding(get: { model.documentError != nil }, set: { if !$0 { model.documentError = nil } })) {
             Button("OK") { model.documentError = nil }
         } message: { Text(model.documentError ?? "") }
     }

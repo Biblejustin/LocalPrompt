@@ -99,9 +99,10 @@ final class ReadingActivity { func setActive(_ active: Bool) {} }
 
 @MainActor
 final class SermonLibraryController {
-    let kind: NoteLibraryKind
+    let info: NoteLibrary
     var folderURL: URL?
-    init(kind: NoteLibraryKind = .sermons) { self.kind = kind }
+    init(library: NoteLibrary, defaults: UserDefaults) { info = library }
+    func update(_ library: NoteLibrary) {}
 }
 
 struct LinkedSermon: Codable {

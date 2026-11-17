@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Mac App Store build only. scripts/build-appstore.sh replaces TEAM_ID.
+     Every key maps to a feature below; remove any key whose feature is removed. -->
+<plist version="1.0"><dict>
+<key>com.apple.application-identifier</key><string>TEAM_ID.com.biblejustin.localprompt</string>
+<key>com.apple.developer.team-identifier</key><string>TEAM_ID</string>
+<key>com.apple.security.app-sandbox</key><true/>
+<!-- Voice follow -->
+<key>com.apple.security.device.audio-input</key><true/>
+<!-- Open, Export, and library folders chosen by the user, kept across launches -->
+<key>com.apple.security.files.user-selected.read-write</key><true/>
+<key>com.apple.security.files.bookmarks.app-scope</key><true/>
+<!-- Shared socket folder with the browser helper -->
+<key>com.apple.security.application-groups</key>
+<array><string>TEAM_ID.com.biblejustin.localprompt</string></array>
+<!-- PowerPoint slide cues -->
+<key>com.apple.security.automation.apple-events</key><true/>
+<key>com.apple.security.temporary-exception.apple-events</key>
+<array><string>com.microsoft.Powerpoint</string></array>
+<!-- Registers the browser helper where Chrome and Brave look for it -->
+<key>com.apple.security.temporary-exception.files.home-relative-path.read-write</key>
+<array>
+<string>/Library/Application Support/Google/Chrome/NativeMessagingHosts/</string>
+<string>/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts/</string>
+</array>
+</dict></plist>

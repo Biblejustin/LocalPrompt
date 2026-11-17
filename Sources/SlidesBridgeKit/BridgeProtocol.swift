@@ -1,15 +1,36 @@
 import Foundation
+import Security
 
 public enum SlidesBridgeIdentity {
     public static let hostName = "com.biblejustin.localprompt.slides"
+    /// The unpacked extension's ID, fixed by the "key" in its manifest.
     public static let extensionID = "ojnmagbchlkpiajkkpkchacbbmnpmlid"
     public static let extensionOrigin = "chrome-extension://\(extensionID)/"
+    /// Every extension the helper accepts. A Chrome Web Store listing gets its
+    /// own ID; add it here once the listing exists.
+    public static let extensionIDs = [extensionID]
+    public static var allowedOrigins: [String] { extensionIDs.map { "chrome-extension://\($0)/" } }
     public static let maximumFrameBytes = 65_536
+    /// The App Group container shared by the app and its browser helper when
+    /// both are signed with one (the sandboxed Mac App Store build). Direct
+    /// downloads carry no group and keep the Application Support location.
+    public static let groupContainer: URL? = {
+        guard let task = SecTaskCreateFromSelf(nil),
+              let value = SecTaskCopyValueForEntitlement(task, "com.apple.security.application-groups" as CFString, nil),
+              let group = (value as? [String])?.first else { return nil }
+        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)
+    }()
+
     public static var directory: URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        // Unix socket paths are capped at 104 bytes, and group container
+        // paths are long, so the sandboxed names stay short.
+        if let groupContainer { return groupContainer.appendingPathComponent("S", isDirectory: true) }
+        return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/LocalPrompt/SlidesBridge", isDirectory: true)
     }
-    public static var socketPath: String { directory.appendingPathComponent("bridge.sock").path }
+    public static var socketPath: String {
+        directory.appendingPathComponent(groupContainer == nil ? "bridge.sock" : "b.sock").path
+    }
 }
 
 public struct SlideSnapshot: Codable, Equatable, Sendable {

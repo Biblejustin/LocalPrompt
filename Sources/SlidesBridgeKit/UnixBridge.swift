@@ -12,7 +12,9 @@ public enum UnixBridge {
                 guard lstat(url.path, &info) == 0 else { throw systemError() }
             }
             guard info.st_uid == getuid(), info.st_mode & S_IFMT == S_IFDIR else { throw SlidesBridgeError.unsafePath }
-            guard chmod(url.path, 0o700) == 0 else { throw systemError() }
+            // The sandbox refuses chmod on the App Group container itself, which
+            // macOS already creates owner-only. Change only what needs changing.
+            guard info.st_mode & 0o777 == 0o700 || chmod(url.path, 0o700) == 0 else { throw systemError() }
         }
     }
 

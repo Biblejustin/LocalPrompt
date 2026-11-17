@@ -16,14 +16,13 @@ struct LocalPromptApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("Open Script…", action: model.openScript).keyboardShortcut("o").disabled(!model.canReplaceScript)
-                Button("Sermons…") { model.selectedLibrary = .sermons }.keyboardShortcut("o", modifiers: [.command, .shift])
-                    .disabled(!model.canReplaceScript)
-                Button("Bible Studies…") { model.selectedLibrary = .bibleStudies }
-                    .disabled(!model.canReplaceScript)
-                Button("Men’s Meetings…") { model.selectedLibrary = .mensMeetings }
-                    .disabled(!model.canReplaceScript)
-                Button("Introduction to the Bible…") { model.selectedLibrary = .introductionToBible }
-                    .disabled(!model.canReplaceScript)
+                ForEach(Array(model.libraries.enumerated()), id: \.element.id) { index, library in
+                    // The first library keeps the original ⇧⌘O shortcut.
+                    Button("\(library.title)…") { model.selectedLibrary = library }
+                        .keyboardShortcut(index == 0 ? KeyboardShortcut("o", modifiers: [.command, .shift]) : nil)
+                        .disabled(!model.canReplaceScript)
+                }
+                Button("Edit Libraries…", action: model.editLibraries)
                 Button("Reload from Obsidian", action: model.reloadSermon)
                     .disabled(model.linkedSermon == nil || !model.canReplaceScript)
                 Button("Restore Previous Draft", action: model.restorePreviousDraft)
