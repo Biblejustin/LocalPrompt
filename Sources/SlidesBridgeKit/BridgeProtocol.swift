@@ -41,20 +41,21 @@ public struct SlideSnapshot: Codable, Equatable, Sendable {
 
 public struct BridgeMessage: Codable, Equatable, Sendable {
     public enum Kind: String, Codable, Sendable { case hello, command, result, disconnect }
-    public enum Operation: String, Codable, Sendable { case status, advance }
+    public enum Operation: String, Codable, Sendable { case status, advance, goToSlide }
     public var v: Int = 1
     public var type: Kind
     public var session: String
     public var requestID: Int?
     public var operation: Operation?
     public var snapshot: SlideSnapshot?
+    public var targetPosition: Int?
     public var error: String?
     public var ended: Bool?
 
     public init(type: Kind, session: String, requestID: Int? = nil, operation: Operation? = nil,
-                snapshot: SlideSnapshot? = nil, error: String? = nil, ended: Bool? = nil) {
+                snapshot: SlideSnapshot? = nil, targetPosition: Int? = nil, error: String? = nil, ended: Bool? = nil) {
         self.type = type; self.session = session; self.requestID = requestID; self.operation = operation
-        self.snapshot = snapshot; self.error = error; self.ended = ended
+        self.snapshot = snapshot; self.targetPosition = targetPosition; self.error = error; self.ended = ended
     }
 
     public func validate() throws {
@@ -63,6 +64,10 @@ public struct BridgeMessage: Codable, Equatable, Sendable {
               error == nil || error!.utf8.count <= 2_048 else { throw SlidesBridgeError.invalidMessage }
         if let requestID, !(1...2_147_483_647).contains(requestID) { throw SlidesBridgeError.invalidMessage }
         try snapshot?.validate()
+        if operation == .goToSlide {
+            guard type == .command, let snapshot, let targetPosition,
+                  (1...snapshot.total).contains(targetPosition) else { throw SlidesBridgeError.invalidMessage }
+        } else if targetPosition != nil { throw SlidesBridgeError.invalidMessage }
         switch type {
         case .hello:
             guard snapshot != nil, requestID == nil, operation == nil, error == nil, ended == nil else { throw SlidesBridgeError.invalidMessage }

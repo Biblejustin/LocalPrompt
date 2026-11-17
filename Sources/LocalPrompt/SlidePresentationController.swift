@@ -42,6 +42,9 @@ final class SlidePresentationController: ObservableObject {
     var isConnected: Bool { target == .brave ? browser.isConnected : powerpoint.isConnected }
     var isBusy: Bool { browser.isBusy || powerpoint.isBusy }
     var connectLabel: String { target == .brave ? "Connect Google Slides" : "Connect PowerPoint" }
+    var supportsManualSync: Bool { target == .brave }
+    var currentSlidePosition: Int? { target == .brave ? browser.currentSlidePosition : nil }
+    var totalSlides: Int? { target == .brave ? browser.totalSlides : nil }
 
     func connect() async {
         if target == .brave { await browser.connect() }
@@ -51,6 +54,16 @@ final class SlidePresentationController: ObservableObject {
     func advance() async throws {
         if target == .brave { try await browser.advance() }
         else { try await powerpoint.advance() }
+    }
+
+    func goToSlide(_ position: Int) async throws {
+        guard target == .brave else { throw ManualSyncError.unsupported }
+        try await browser.goToSlide(position)
+    }
+
+    func refreshPosition() async throws -> Int {
+        guard target == .brave else { throw ManualSyncError.unsupported }
+        return try await browser.refreshPosition()
     }
 
     func disconnect() {
@@ -64,9 +77,14 @@ final class SlidePresentationController: ObservableObject {
         do {
             let folder = try BraveExtensionSetup.prepare()
             try browser.startListening()
-            setupMessage = "In Brave, open brave://extensions, enable Developer mode, choose Load unpacked, and select the BraveExtension folder shown in Finder. Then open your slideshow and click the LocalPrompt Slides extension → Connect this slideshow. Return here and click Connect Google Slides."
+            setupMessage = "In Brave, open brave://extensions, enable Developer mode, choose Load unpacked, and select the BraveExtension folder shown in Finder. If already installed, click Reload instead. Then open your deck → LocalPrompt Slides → Connect this deck. LocalPrompt pairs automatically."
             NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: folder.path)
         } catch { errorMessage = error.localizedDescription }
+    }
+
+    private enum ManualSyncError: LocalizedError {
+        case unsupported
+        var errorDescription: String? { "Manual slide sync currently supports Google Slides in Brave." }
     }
 }
 

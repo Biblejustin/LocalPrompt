@@ -15,7 +15,20 @@ struct LocalPromptApp: App {
         .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("Open Script…", action: model.openScript).keyboardShortcut("o")
+                Button("Open Script…", action: model.openScript).keyboardShortcut("o").disabled(!model.canReplaceScript)
+                Button("Sermons…") { model.selectedLibrary = .sermons }.keyboardShortcut("o", modifiers: [.command, .shift])
+                    .disabled(!model.canReplaceScript)
+                Button("Bible Studies…") { model.selectedLibrary = .bibleStudies }
+                    .disabled(!model.canReplaceScript)
+                Button("Men’s Meetings…") { model.selectedLibrary = .mensMeetings }
+                    .disabled(!model.canReplaceScript)
+                Button("Introduction to the Bible…") { model.selectedLibrary = .introductionToBible }
+                    .disabled(!model.canReplaceScript)
+                Button("Reload from Obsidian", action: model.reloadSermon)
+                    .disabled(model.linkedSermon == nil || !model.canReplaceScript)
+                Button("Restore Previous Draft", action: model.restorePreviousDraft)
+                    .disabled(!model.hasPreviousDraft || !model.canReplaceScript)
+                Divider()
                 Button("Export Script…", action: model.exportScript).keyboardShortcut("s", modifiers: [.command, .shift])
             }
             CommandMenu("Prompt") {

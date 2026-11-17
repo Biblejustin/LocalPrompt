@@ -1,13 +1,14 @@
-import { VERSION, CHANNEL, NATIVE_HOST, presentationID, validSnapshot, validateCommand, errorText } from "./protocol.js";
+import { VERSION, CHANNEL, NATIVE_HOST, presentationID, slideshowSelection, validSnapshot, validateCommand, errorText } from "./protocol.js";
 
-const CONNECTOR_BUILD = "0.4.0.2";
+const CONNECTOR_BUILD = "0.5.5";
 let connection = null;
-let connecting = false;
+let attempt = null;
 let lastError = "";
 
 function publicStatus() {
   return {
-    connected: Boolean(connection), connecting,
+    connected: Boolean(connection), paired: Boolean(connection?.paired),
+    connecting: Boolean(attempt || (connection && !connection.paired)),
     connectorBuild: CONNECTOR_BUILD,
     contentBuild: connection?.contentBuild ?? null,
     snapshot: connection?.snapshot ?? null,
@@ -34,10 +35,12 @@ function navigationSummary(value, expectedDeckID) {
 }
 
 function disconnect(reason = "", notifyNative = true) {
+  attempt = null;
   const previous = connection;
   connection = null;
   lastError = reason;
   if (!previous) return;
+  clearTimeout(previous.handshakeTimer);
   if (notifyNative) {
     try { previous.port.postMessage({ v: VERSION, type: "disconnect", session: previous.session, ...(reason ? { error: reason } : {}) }); }
     catch { /* The native app may already have closed its port. */ }
@@ -45,11 +48,52 @@ function disconnect(reason = "", notifyNative = true) {
   previous.port.disconnect();
 }
 
-async function contentRequest(target, operation, expected) {
+function checkAttempt(current) {
+  if (attempt !== current) throw new Error("Slide connection canceled.");
+}
+
+async function selectedTab(current) {
+  checkAttempt(current);
+  const tab = await bounded(chrome.tabs.get(current.tabId));
+  checkAttempt(current);
+  const selection = slideshowSelection(tab.url);
+  if (selection?.deckID !== current.deckID || (current.arrived && selection.route !== "present")) {
+    throw new Error("The selected tab changed while connecting. Select the deck again.");
+  }
+  if (selection.route === "present") current.arrived = true;
+  return tab;
+}
+
+async function prepareSlideshow(current) {
+  const deadline = Date.now() + 15000;
+  let injected = false;
+  while (Date.now() < deadline) {
+    const tab = await selectedTab(current);
+    if (current.arrived && tab.status !== "loading") {
+      if (!injected) {
+        await bounded(chrome.scripting.executeScript({ target: { tabId: current.tabId, frameIds: [0] }, files: ["content.js"] }));
+        checkAttempt(current);
+        injected = true;
+      }
+      const ready = await bounded(chrome.tabs.sendMessage(current.tabId, { channel: CHANNEL, operation: "ready" }, { frameId: 0 }));
+      checkAttempt(current);
+      if (ready?.contentBuild !== CONNECTOR_BUILD) throw new Error("The slideshow is using an older connector. Refresh the slideshow tab, then reconnect.");
+      if (!ready?.ok) throw new Error(ready?.error || "Could not prepare this slideshow.");
+      if (ready.ready) return;
+    }
+    await new Promise(resolve => setTimeout(resolve, 150));
+  }
+  throw new Error("Google Slides is still loading. Wait for the slide, then connect again.");
+}
+
+async function contentRequest(target, operation, expected, targetPosition) {
   const tab = await chrome.tabs.get(target.tabId);
   if (connection !== target) throw new Error("Slide connection was canceled before dispatch.");
   if (presentationID(tab.url) !== target.snapshot.deckID) throw new Error("The selected tab left its Google Slides slideshow. Connect again.");
-  const result = await chrome.tabs.sendMessage(target.tabId, { channel: CHANNEL, operation, ...(expected ? { expected } : {}) }, { frameId: 0 });
+  const result = await chrome.tabs.sendMessage(target.tabId, {
+    channel: CHANNEL, operation, ...(expected ? { expected } : {}),
+    ...(operation === "goToSlide" ? { targetPosition } : {}),
+  }, { frameId: 0 });
   if (result?.contentBuild !== CONNECTOR_BUILD) throw new Error("The slideshow is using an older connector. Refresh the slideshow tab, then reconnect.");
   if (!result?.ok) throw new Error(result?.error || "The slideshow did not respond. Reconnect before continuing.");
   if (!validSnapshot(result.snapshot) || result.snapshot.deckID !== target.snapshot.deckID || result.snapshot.pageID !== target.snapshot.pageID) {
@@ -96,9 +140,13 @@ function reply(target, command, result) {
 async function executeCommand(target, command) {
   if (connection !== target) return;
   try {
-    const result = await contentRequest(target, command.operation, command.snapshot);
+    const result = await contentRequest(target, command.operation, command.snapshot, command.targetPosition);
     if (connection !== target) return;
     target.snapshot = result.snapshot;
+    if (command.operation === "status") {
+      target.paired = true;
+      clearTimeout(target.handshakeTimer);
+    }
     reply(target, command, { snapshot: result.snapshot, ...(result.ended ? { ended: true } : {}) });
   } catch (error) {
     if (connection !== target) return;
@@ -126,28 +174,44 @@ function nativeMessage(target, message) {
 }
 
 async function connect() {
-  if (connecting) throw new Error("A slideshow connection is already in progress.");
-  connecting = true;
+  if (attempt || (connection && !connection.paired)) throw new Error("A slideshow connection is already in progress.");
   disconnect();
+  const current = {};
+  attempt = current;
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    const deckID = presentationID(tab?.url);
-    if (!tab?.id || !deckID) throw new Error("Open Google Slides in Slideshow mode, then click Connect this slideshow. Editing and presenter-notes tabs are not supported.");
-    await chrome.scripting.executeScript({ target: { tabId: tab.id, frameIds: [0] }, files: ["content.js"] });
-    const initial = await chrome.tabs.sendMessage(tab.id, { channel: CHANNEL, operation: "status" }, { frameId: 0 });
+    checkAttempt(current);
+    const selection = slideshowSelection(tab?.url);
+    if (!tab?.id || !selection) throw new Error("Open a Google Slides deck, then click Connect this deck. Presenter-notes and published tabs are not supported.");
+    Object.assign(current, { tabId: tab.id, deckID: selection.deckID, arrived: selection.route === "present" });
+    if (selection.route === "edit") {
+      // Keep the same tab: its explicit activeTab grant survives this same-origin
+      // navigation. Back returns to the editor; no broader host permission.
+      await bounded(chrome.tabs.update(tab.id, { url: selection.url }));
+      checkAttempt(current);
+    }
+    await prepareSlideshow(current);
+    const initial = await bounded(chrome.tabs.sendMessage(tab.id, { channel: CHANNEL, operation: "status" }, { frameId: 0 }));
+    checkAttempt(current);
     if (initial?.contentBuild !== CONNECTOR_BUILD) throw new Error("The slideshow is using an older connector. Refresh the slideshow tab, then reconnect.");
     if (!initial?.ok) throw new Error(initial?.error || "Could not read this slideshow.");
-    if (!validSnapshot(initial.snapshot) || initial.snapshot.deckID !== deckID) throw new Error("Google Slides returned an invalid position.");
+    if (!validSnapshot(initial.snapshot) || initial.snapshot.deckID !== selection.deckID) throw new Error("Google Slides returned an invalid position.");
+    const verifiedTab = await selectedTab(current);
+    if (presentationID(verifiedTab.url) !== selection.deckID) throw new Error("The selected tab left its slideshow while connecting.");
     const port = chrome.runtime.connectNative(NATIVE_HOST);
-    const target = { tabId: tab.id, session: crypto.randomUUID(), snapshot: initial.snapshot, contentBuild: initial.contentBuild, lastRequestID: 0, commands: Promise.resolve(), port };
+    const target = { tabId: tab.id, session: crypto.randomUUID(), snapshot: initial.snapshot, contentBuild: initial.contentBuild, lastRequestID: 0, commands: Promise.resolve(), port, paired: false };
     connection = target;
+    target.handshakeTimer = setTimeout(() => {
+      if (connection === target && !target.paired) disconnect("LocalPrompt did not finish pairing. Open LocalPrompt, pause reading, then connect this deck again.");
+    }, 10000);
     port.onMessage.addListener(message => nativeMessage(target, message));
     port.onDisconnect.addListener(() => {
       const error = chrome.runtime.lastError?.message;
       if (connection === target) {
+        clearTimeout(target.handshakeTimer);
         connection = null;
         lastError = error
-          ? "LocalPrompt's slide bridge is unavailable. Open LocalPrompt, click Prepare Brave extension, then reconnect this slideshow."
+          ? "Open LocalPrompt, then connect this deck again. For first-time setup, use Prepare Brave extension in LocalPrompt."
           : "LocalPrompt disconnected. Reconnect this slideshow when ready.";
       }
     });
@@ -155,9 +219,9 @@ async function connect() {
     lastError = "";
     return publicStatus();
   } catch (error) {
-    disconnect(errorText(error));
+    if (attempt === current) disconnect(errorText(error));
     throw error;
-  } finally { connecting = false; }
+  } finally { if (attempt === current) attempt = null; }
 }
 
 chrome.runtime.onMessage.addListener((message, sender, replyToPopup) => {
@@ -176,13 +240,17 @@ chrome.runtime.onMessage.addListener((message, sender, replyToPopup) => {
   if (message.action === "status") { replyToPopup({ ok: true, ...publicStatus() }); return false; }
   if (message.action === "disconnect") { disconnect(); replyToPopup({ ok: true, ...publicStatus() }); return false; }
   if (message.action !== "connect") return false;
-  connect().then(status => replyToPopup({ ok: true, ...status, connecting: false }), error => replyToPopup({ ok: false, ...publicStatus(), connecting: false, error: errorText(error) }));
+  connect().then(() => replyToPopup({ ok: true, ...publicStatus() }), error => replyToPopup({ ok: false, ...publicStatus(), error: errorText(error) }));
   return true;
 });
 
-chrome.tabs.onRemoved.addListener(tabID => { if (connection?.tabId === tabID) disconnect("The selected slideshow tab closed."); });
-chrome.tabs.onReplaced.addListener((_added, removed) => { if (connection?.tabId === removed) disconnect("The slideshow tab was replaced. Reconnect before continuing."); });
+chrome.tabs.onRemoved.addListener(tabID => { if (connection?.tabId === tabID || attempt?.tabId === tabID) disconnect("The selected slideshow tab closed."); });
+chrome.tabs.onReplaced.addListener((_added, removed) => { if (connection?.tabId === removed || attempt?.tabId === removed) disconnect("The slideshow tab was replaced. Reconnect before continuing."); });
 chrome.tabs.onUpdated.addListener((tabID, change) => {
+  if (attempt?.tabId === tabID && (change.url || change.status === "complete")) {
+    const current = attempt;
+    void selectedTab(current).catch(error => { if (attempt === current) disconnect(errorText(error)); });
+  }
   if (connection?.tabId !== tabID) return;
   // Brave emits loading/complete for Slides' same-document URL changes too.
   // pagehide invalidates real navigation immediately; this nonce probe catches

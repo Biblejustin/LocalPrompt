@@ -26,9 +26,23 @@ Open LocalPrompt from Applications (local builds install into `~/Applications/Lo
 - After a skipped sentence, voice following can recover within the next 320 script words when it hears a strong, distinctive phrase. Short or ambiguous phrases hold your place until there is enough evidence; clicking a word still lets you jump explicitly.
 - Click a word to jump there. Use the transport buttons to rewind or move ten words.
 - The active reading line stays near the top of the prompter, keeping your eyes closer to your audience.
-- Fullscreen hides the header, editor, status, progress, and playback controls. Text starts at the top edge. **⌃⌘F** toggles fullscreen; **Esc** exits and restores controls. **⌘Return** starts/pauses while fullscreen; word navigation shortcuts still work. A speech error returns to the controls so its message is visible.
+- Fullscreen keeps text at the top edge and hides the header and editor. A compact bottom bar has **Start/Pause**, ten-word navigation, slide status/setup, **Previous slide / Next slide**, **Match slide**, **Match notes**, a timer, microphone level, and **Exit full screen**. Controls have their own space below the script; narrow displays use two rows. Reconnect instructions and errors appear above the bar without leaving fullscreen. **⌃⌘F** toggles fullscreen; **Esc** exits; **⌘Return** starts/pauses.
 - Change font size and margins, mirror text for teleprompter glass, hide the editor, or enter fullscreen.
 - **⌘Return** starts/pauses. **⇧⌘R** rewinds. **⌘↑ / ⌘↓** move ten words. **⌘O** opens a script. **⇧⌘S** exports text.
+
+## Obsidian note libraries
+
+Use **Sermons**, **Bible Studies**, **Men’s Meetings**, or **Introduction to the Bible** in the header or File menu. Each picker remembers its own Obsidian folder and optional filename filter on this Mac. Existing sermon folders carry over; **⇧⌘O** still opens Sermons. Markdown notes from the chosen folder and its subfolders appear newest first. Search by filename or folder path, select a note, then click **Open sermon**, **Open Bible study**, **Open topic**, or **Open lesson**. Narrow windows use library icons with names shown on hover. No Obsidian plugin or account connection is required.
+
+If a folder mixes different kinds of notes, set **Filename filter** to text contained in the filenames you want. This filter is remembered separately for each library and ignores case; clear it to show all Markdown notes. It filters filenames, not note contents or Obsidian tags.
+
+The prompter hides YAML frontmatter and displays Obsidian wikilink labels. The editor and export retain the original Markdown. Embedded notes are not expanded. Existing `[[next-slide]]` cues continue to work.
+
+**Open in browser** opens a Google Slides, Sheets, Docs, or Drive link from the current note in Brave (or the default browser if Brave is not installed). It finds links in frontmatter and the note body, including ordinary Markdown links. The button is greyed out when no supported link exists; multiple links appear in a menu. Find it below **Open / Export**, or inside **Slide cues** while fullscreen. Opening a file leaves reading and slide pairing unchanged; connect the deck through the Brave extension when ready.
+
+**Refresh list** rescans the folder for new, renamed, or changed files. **Reload** beside “Obsidian copy” reads the selected note again after you edit it in Obsidian. Reload is manual and available only while paused; it never changes your script during a reading session. A changed note resets reading to the beginning and disconnects slide control. An unchanged reload keeps your place.
+
+Opening or reloading a note replaces only LocalPrompt's local draft. It never writes back to your vault. The previous draft is saved locally; **File → Restore Previous Draft** swaps back, including its source association. This keeps one previous draft, not a full revision history. A missing or unreadable note leaves your current draft intact. Hidden files, packages, and symbolic links are excluded; imported notes must be UTF-8 Markdown and at most 5 MB.
 
 ## Slide cues
 
@@ -44,15 +58,29 @@ Now read the notes for slide two.
 
 Cues stay in the editor and exported source, but disappear from the prompter and word count. Code examples and inline mentions remain ordinary text. In Voice follow, a cue fires when recognition reaches its preceding words; in Steady pace, it fires when timed reading crosses that position. Recognition can lag slightly behind your voice.
 
+If the script has cues, **Start reading** requires a connected slideshow. For rehearsal without a deck, choose **Read without slides** explicitly. Pairing turns slide cues back on and starts a fresh cue pass from your current notes, so earlier browsing or rehearsal cannot silently disable later cues. Earlier cues are not replayed. Slide status stays visible at the bottom of the prompter, including fullscreen; the reading line remains at the top.
+
+Connecting a deck does not create cues in your notes. If a connected deck has multiple slides but the loaded note has no cues, LocalPrompt warns and blocks reading and click-to-slide matching. Open the teleprompter copy prepared for that deck, or choose **Disconnect and read notes** for voice following without slides. Ordinary notes still work without a connected deck.
+
 ### Google Slides in Brave
 
 1. In LocalPrompt, open **Slide cues → Google Slides in Brave → Prepare Brave extension**. Finder opens the extension folder. This also registers the bundled local helper.
 2. Open `brave://extensions`. Enable **Developer mode**, click **Load unpacked**, and select that **BraveExtension** folder. This extension ships with LocalPrompt; it is not yet in the Chrome Web Store.
-3. Open your Google Slides deck in **Slideshow** mode. Use the presentation tab whose URL contains `/present`; the editor and presenter-notes window are deliberately rejected.
-4. Click Brave's Extensions button, open **LocalPrompt Slides**, and click **Connect this slideshow**. This selects that exact tab.
-5. Return to LocalPrompt, align your notes with the displayed slide, and click **Connect Google Slides**. Start reading.
+3. Open your script in LocalPrompt and leave reading paused. Align your notes with the slide you want to start from.
+4. Open your deck in Brave, click Brave's Extensions button → **LocalPrompt Slides → Connect this deck**. The extension opens the supported slideshow view in that same tab when needed. LocalPrompt pairs automatically; no URL editing or second Connect button is needed.
+5. Check the displayed slide matches your notes, return to LocalPrompt, and start reading.
 
-For later reading sessions, open **Slide cues → Connect Google Slides** in LocalPrompt first to start the local bridge. Select your slideshow through the Brave extension, then click **Connect Google Slides** again to confirm its position. Loading or editing notes disconnects slide control, so finish preparing your script before pairing.
+Both the normal deck editor and an existing standalone slideshow can be selected. If Google shows an embedded slideshow on an editor page, the extension opens the standalone slideshow automatically. This changes the tab's playback view, not the deck; Brave's Back button returns to the previous page. Presenter view and its speaker-notes window are not connection targets.
+
+For later reading sessions: open your script in LocalPrompt, then select your deck once through the Brave extension. Keep LocalPrompt open while pairing. Connecting verifies the current slide; it does not start reading, rewind notes, or advance a slide. If reading or microphone preparation is active, connecting from Brave pauses it and keeps your place. After pairing, use **Match slide to notes** (or click your current word) to align the deck, then press **Start reading**. An in-flight slide command still must finish before reconnecting. Loading or editing notes disconnects slide control, so finish preparing your script before pairing. Keep **Google Slides in Brave** selected as the presentation target.
+
+Once connected, **click any word in the prompter to move both notes and slideshow to that section**. Moving ten words with the transport buttons or keyboard does the same. The first section maps to slide 1; each `[[next-slide]]` starts the next section. For notes covering only part of a deck, set **Slide cues → Notes start on slide** to the slide belonging to the opening words. This setting resets to 1 when the script changes. Pairing midway through notes does not infer a different starting slide.
+
+A manual jump pauses reading, selects the destination slide directly, and moves the text only after Brave confirms it. If reading was running, it resumes afterward. Jumping backward rearms later cues so rereading that section advances slides again. Additional clicks are ignored while a slide command is in progress. A failed jump leaves reading paused; check the slide before reconnecting.
+
+Fullscreen's **Previous slide / Next slide** buttons move the connected Brave deck one slide while keeping your place in the notes. Reading pauses briefly for confirmation and resumes if it was running. These buttons leave cue history intact; the next unread cue advances from the corrected slide. Use **Match slide** while paused to return the deck to the section belonging to your current notes. Navigation is disabled while disconnected, busy, or preparing the microphone, and at the first/last slide. These manual slide buttons currently support Google Slides in Brave.
+
+**Match notes**, beside **Match slide** in fullscreen, does the reverse: it reads the current slide from Brave and moves the teleprompter to the first word of that slide’s notes, without changing the slide. This also works after you move slides directly in Brave. It uses your script’s `[[next-slide]]` cues and **Notes start on slide** setting. Reading resumes if it was running; otherwise it stays paused. Jumping back rearms later cues. If the slide has no corresponding notes, LocalPrompt keeps your place and explains the mismatch.
 
 For Sidecar, use the iPad as an **extended display**, move LocalPrompt there, and leave Brave's slideshow on your Mac or projector. LocalPrompt stays a Mac app; no iPad app is required. Automatic cues do not activate Brave or send global keyboard shortcuts.
 
@@ -66,7 +94,7 @@ Start exactly one ordinary PowerPoint slideshow, then choose **Slide cues → Po
 
 ### Cue behavior
 
-**Test next slide** moves the real slideshow once. Return it to the matching slide and reconnect before reading. Each cue runs once per pass. Manual seeking does not advance slides or replay crossed cues. **Rewind** rearms cues and disconnects: return the slideshow to its matching starting slide, then reconnect. Editing the script also disconnects. Pause cancels queued changes; an already-sent command may finish once, so check the slide and reconnect. Errors pause reading and commands are never retried automatically. The final slide stays visible.
+**Test next slide** moves the real slideshow once. Return it to the matching slide and reconnect before reading. Each cue runs once per pass. Connected Brave seeks synchronize the deck and begin a new cue pass from the destination; PowerPoint and disconnected seeks move notes only. **Rewind** rearms cues and disconnects: return the slideshow to its matching starting slide, then reconnect. Editing the script also disconnects. Pause cancels queued changes; an already-sent command may finish once, so check the slide and reconnect. Errors pause reading and commands are never retried automatically. The final slide stays visible.
 
 Rehearse your complete deck before using automatic cues live. LocalPrompt does not import speaker notes; paste or open them as a script. Presentations on another computer and PowerPoint on Windows are not supported.
 
@@ -76,7 +104,9 @@ macOS 26 or newer and a Mac supported by Apple's SpeechTranscriber. This first b
 
 Recognition runs on this Mac. Audio is held in memory for recognition and is not saved by LocalPrompt. The app has no cloud transcription fallback, analytics, or network client. Apple may download a missing language model during setup. Once installed, the model supports offline transcription. macOS manages model storage.
 
-Script draft, title, and preferences are stored in local UserDefaults for `com.biblejustin.localprompt`. Export important scripts as files. Imported documents are read only; export explicitly to write a file.
+Script draft, title, previous draft, library folder/source bookmarks, filename filters, and preferences are stored in local UserDefaults for `com.biblejustin.localprompt`. Folder indexing reads filenames and modification dates; note contents are read when opened or manually reloaded. Export important scripts as files. Imported documents are read only; export explicitly to write a file. Vault paths and note contents are not bundled with the app.
+
+Slide troubleshooting events are saved locally in `~/Library/Logs/LocalPrompt/slides.jsonl` and one rotated backup, limited to 256 KiB each with owner-only permissions. Events contain timestamps, app version, fixed event names, and word/cue/slide counts. They never contain note text, speech, presentation titles, deck IDs, URLs, or raw error messages. Nothing is uploaded.
 
 Optional Brave slide control uses a bundled extension with only `activeTab`, `scripting`, and `nativeMessaging` permissions. It accesses the slideshow tab you explicitly select. Slide identity and position pass through a native helper and a private Unix socket on this Mac. No local web server, cloud relay, API key, microphone access, or full browsing-history permission is required. The extension never receives your script or audio. Google Slides itself remains Google's web service.
 
@@ -93,6 +123,10 @@ git clone https://github.com/Biblejustin/LocalPrompt.git
 cd LocalPrompt
 swift test
 node --test Tests/BrowserExtensionTests/*.test.mjs
+./scripts/test-browser-pairing.sh
+./scripts/test-audio-level.sh
+./scripts/test-manual-slide-sync.sh
+./scripts/test-slide-diagnostics.sh
 ./scripts/build-app.sh
 open "$HOME/Applications/LocalPrompt.app"
 ```
@@ -107,13 +141,13 @@ To create the downloadable Apple silicon ZIP and checksum without installing ano
 
 The files are written to `dist/`. Packaging strips debug symbols, checks for private machine paths, validates the bundle and extracted signature, and verifies the archive's exact file list. It does not include user data or register another app in macOS search.
 
-Core tests exercise partial transcript revisions, repeated phrases, omitted words, off-script speech, and manual seek. `scripts/SpeechCheck.swift` is an additional developer check for actual on-device recognition without microphone access. Compile it alongside `Sources/LocalPrompt/SpeechController.swift` and provide a synthetic audio fixture matching its `expected` text.
+Core tests exercise partial transcript revisions, repeated phrases, omitted words, off-script speech, and manual seek. `scripts/SpeechCheck.swift` is an additional developer check for actual on-device recognition without microphone access. Compile it alongside `Sources/LocalPrompt/SpeechController.swift` and `Sources/LocalPrompt/AudioLevel.swift`, and provide a synthetic audio fixture matching its `expected` text.
 
 ## First-build scope
 
 Voice following uses nearby phrase alignment with a bounded forward recovery search. It holds when speech cannot be confidently matched. Jumps beyond the recovery window, repeated passages, unusually pronounced names, and substantial paraphrasing may need a click to resynchronize. This is an independently implemented prototype, not PromptSmart's proprietary VoiceTrack engine. Live microphone behavior should be tried with your microphone and speaking style before using it for a recording or live event.
 
-This version has one autosaved draft, text/RTF import, and the main prompter window. PDF/DOCX import, script libraries, remote control, camera recording, and a dedicated second-display output are not included.
+This version has one autosaved draft, previous-draft recovery, Obsidian note libraries, text/RTF import, and the main prompter window. PDF/DOCX import, automatic vault synchronization, remote control, camera recording, and a dedicated second-display output are not included.
 
 ## References
 

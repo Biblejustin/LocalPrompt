@@ -52,6 +52,36 @@ final class SlidesBridgeKitTests: XCTestCase {
         XCTAssertThrowsError(try BridgeFraming.encode(BridgeMessage(type: .result, session: session, requestID: 0, snapshot: snapshot)))
     }
 
+    func testGoToSlideRequiresBoundedTargetAndExpectedSnapshot() throws {
+        for target in [1, snapshot.total] {
+            let message = BridgeMessage(type: .command, session: session, requestID: 1,
+                                        operation: .goToSlide, snapshot: snapshot, targetPosition: target)
+            var decoder = BridgeFrameDecoder()
+            XCTAssertEqual(try decoder.append(BridgeFraming.encode(message)), [message])
+        }
+        for target in [nil, 0, snapshot.total + 1, Int.max] as [Int?] {
+            XCTAssertThrowsError(try BridgeFraming.encode(BridgeMessage(type: .command, session: session, requestID: 1,
+                                                                       operation: .goToSlide, snapshot: snapshot, targetPosition: target)))
+        }
+        XCTAssertThrowsError(try BridgeFraming.encode(BridgeMessage(type: .command, session: session, requestID: 1,
+                                                                   operation: .goToSlide, targetPosition: 1)))
+    }
+
+    func testOnlyGoToSlideCommandsMayCarryTargetPosition() throws {
+        for operation in [BridgeMessage.Operation.status, .advance] {
+            XCTAssertThrowsError(try BridgeFraming.encode(BridgeMessage(type: .command, session: session, requestID: 1,
+                                                                       operation: operation, snapshot: snapshot, targetPosition: 1)))
+        }
+        for kind in [BridgeMessage.Kind.hello, .result, .disconnect] {
+            XCTAssertThrowsError(try BridgeFraming.encode(BridgeMessage(type: kind, session: session,
+                                                                       requestID: kind == .result ? 1 : nil,
+                                                                       snapshot: snapshot, targetPosition: 1)))
+            XCTAssertThrowsError(try BridgeFraming.encode(BridgeMessage(type: kind, session: session,
+                                                                       requestID: kind == .result ? 1 : nil,
+                                                                       operation: .goToSlide, snapshot: snapshot, targetPosition: 1)))
+        }
+    }
+
     func testPrivateSocketRoundTripAndDuplicateServerLock() throws {
         let root = try temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }

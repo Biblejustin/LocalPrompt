@@ -5,8 +5,27 @@ export const NATIVE_HOST = "com.biblejustin.localprompt.slides";
 export function presentationID(value) {
   try {
     const url = new URL(value);
-    if (url.protocol !== "https:" || url.hostname !== "docs.google.com" || url.port) return null;
+    if (url.protocol !== "https:" || url.hostname !== "docs.google.com" || url.port || url.username || url.password) return null;
     return /^\/presentation\/d\/([A-Za-z0-9_-]+)\/present\/?$/.exec(url.pathname)?.[1] ?? null;
+  } catch { return null; }
+}
+
+// Selection can start in the editor, but control is still restricted to the
+// standalone slideshow. Never copy arbitrary query values (including tokens).
+export function slideshowSelection(value) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.hostname !== "docs.google.com" || url.port || url.username || url.password) return null;
+    const match = /^\/presentation\/d\/([A-Za-z0-9_-]{1,256})\/(edit|present)\/?$/.exec(url.pathname);
+    if (!match) return null;
+    const [, deckID, route] = match;
+    const canonical = new URL(`https://docs.google.com/presentation/d/${deckID}/present`);
+    // The editor updates its hash as selection moves; its query can lag behind.
+    const hashSlide = new URLSearchParams(url.hash.slice(1)).get("slide");
+    const querySlide = url.searchParams.get("slide");
+    const slide = route === "edit" ? hashSlide || querySlide : querySlide || hashSlide;
+    if (slide && /^id\.[A-Za-z0-9_.-]{1,253}$/.test(slide)) canonical.searchParams.set("slide", slide);
+    return { deckID, route, url: canonical.href };
   } catch { return null; }
 }
 
@@ -25,8 +44,15 @@ export function validateCommand(message, connection) {
       message.session !== connection.session) throw new Error("Invalid slide-control session.");
   if (!Number.isSafeInteger(message.requestID) || message.requestID < 1 ||
       message.requestID <= connection.lastRequestID) throw new Error("Duplicate or out-of-order slide command. Reconnect before continuing.");
-  if (!["status", "advance"].includes(message.operation)) throw new Error("Unsupported slide command.");
-  if (message.operation === "advance" && !validSnapshot(message.snapshot)) throw new Error("Missing or invalid expected slide position.");
+  if (!["status", "advance", "goToSlide"].includes(message.operation)) throw new Error("Unsupported slide command.");
+  if (message.operation !== "status" && !validSnapshot(message.snapshot)) throw new Error("Missing or invalid expected slide position.");
+  if (message.operation === "goToSlide") {
+    if (!Number.isSafeInteger(message.targetPosition) || message.targetPosition < 1 || message.targetPosition > message.snapshot.total) {
+      throw new Error("Missing or invalid target slide position.");
+    }
+  } else if (Object.hasOwn(message, "targetPosition")) {
+    throw new Error("Unexpected target slide position.");
+  }
 }
 
 export function errorText(error) {

@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import PromptCore
 
 private let canvas = Color(red: 0.055, green: 0.072, blue: 0.09)
 private let panel = Color(red: 0.085, green: 0.105, blue: 0.125)
@@ -30,7 +31,8 @@ struct ContentView: View {
                 }
                 stage
             }
-            if !windowState.isFullScreen { transport }
+            if windowState.isFullScreen { fullscreenTransport }
+            else { transport }
         }
         .background(canvas)
         .background(PrompterWindowReader(state: windowState).frame(width: 0, height: 0))
@@ -38,35 +40,57 @@ struct ContentView: View {
         .tint(mint)
         .onReceive(timer) { _ in model.tick() }
         .onExitCommand(perform: windowState.isFullScreen ? { windowState.exitFullScreen() } : nil)
-        .onChange(of: speech.errorMessage) { _, message in
-            if message != nil { windowState.exitFullScreen() }
+        .sheet(item: $model.selectedLibrary) { kind in
+            SermonLibraryView(model: model, library: model.library(for: kind))
         }
-        .onChange(of: model.slideError) { _, message in
-            if message != nil { windowState.exitFullScreen() }
-        }
-        .alert("Script", isPresented: Binding(get: { model.documentError != nil }, set: { if !$0 { model.documentError = nil } })) {
+        .alert("Script", isPresented: Binding(get: { model.documentError != nil && model.selectedLibrary == nil }, set: { if !$0 { model.documentError = nil } })) {
             Button("OK") { model.documentError = nil }
         } message: { Text(model.documentError ?? "") }
     }
 
     private var header: some View {
+        ViewThatFits(in: .horizontal) {
+            headerRow(showSpeechBadge: true)
+            headerRow(showSpeechBadge: false)
+            headerRow(showSpeechBadge: false, compactLibraries: true)
+        }
+        .buttonStyle(.borderless)
+        .padding(.leading, 85).padding(.trailing, 24).frame(height: 72)
+    }
+
+    private func headerRow(showSpeechBadge: Bool, compactLibraries: Bool = false) -> some View {
         HStack(spacing: 12) {
             Image(systemName: "waveform.path").font(.system(size: 25, weight: .semibold)).foregroundStyle(mint)
             VStack(alignment: .leading, spacing: 2) {
                 Text("LocalPrompt").font(.system(size: 19, weight: .semibold))
                 Text("YOUR WORDS. YOUR PACE.").font(.system(size: 9, weight: .medium, design: .monospaced)).tracking(1.4).foregroundStyle(.secondary)
+            }.fixedSize()
+            Spacer(minLength: 8)
+            if showSpeechBadge {
+                Label("ON-DEVICE SPEECH", systemImage: "lock.shield")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(mint).padding(.horizontal, 12).padding(.vertical, 7)
+                    .background(mint.opacity(0.08), in: Capsule())
+                    .fixedSize()
             }
-            Spacer()
-            Label("ON-DEVICE SPEECH", systemImage: "lock.shield")
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundStyle(mint).padding(.horizontal, 12).padding(.vertical, 7)
-                .background(mint.opacity(0.08), in: Capsule())
+            ForEach(NoteLibraryKind.allCases) { kind in
+                Button { model.selectedLibrary = kind } label: {
+                    if compactLibraries {
+                        Image(systemName: kind.symbol).font(.system(size: 13))
+                            .frame(width: 24, height: 24)
+                    } else {
+                        Label(kind.title, systemImage: kind.symbol).font(.system(size: 11)).fixedSize()
+                    }
+                }.accessibilityLabel(kind.title)
+                    .help("\(kind.title): browse \(kind.pluralNoun) from Obsidian")
+                    .disabled(!model.canReplaceScript)
+            }
             Button {
                 if !showSlideSettings { model.captureSlideCueInsertionPoint() }
                 showSlideSettings.toggle()
             } label: {
                 Label("Slide cues", systemImage: "rectangle.on.rectangle")
-                    .font(.system(size: 11))
+                    .font(.system(size: 11)).fixedSize()
             }.help("Connect Google Slides in Brave or PowerPoint and set up slide cues")
                 .popover(isPresented: $showSlideSettings) { slideSettings }
             Button { withAnimation(.easeInOut(duration: 0.2)) { showEditor.toggle() } } label: {
@@ -74,16 +98,15 @@ struct ContentView: View {
             }.help("Show or hide script editor")
             Button { windowState.toggleFullScreen() } label: {
                 Image(systemName: "arrow.up.left.and.arrow.down.right")
-            }.help("Full screen · ⌃⌘F. Esc returns controls; ⌘Return starts or pauses.")
+            }.help("Full screen · ⌃⌘F. Esc exits; ⌘Return starts or pauses.")
         }
-        .buttonStyle(.borderless)
-        .padding(.leading, 85).padding(.trailing, 24).frame(height: 72)
     }
 
     private var slideSettings: some View {
         ScrollView {
           VStack(alignment: .leading, spacing: 14) {
             Text("SLIDE CUES").font(.system(size: 11, weight: .semibold, design: .monospaced))
+            googleLinkButton
             Picker("Presentation", selection: Binding(
                 get: { model.presentation.target },
                 set: { model.presentation.target = $0 }
@@ -105,21 +128,45 @@ struct ContentView: View {
                 .font(.caption).foregroundStyle(.secondary)
             Divider()
             Text(model.presentation.status).font(.callout).fixedSize(horizontal: false, vertical: true)
+            if let message = model.slideConnectionMessage {
+                Text(message).font(.callout).foregroundStyle(mint)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if model.needsSlideCues {
+                Text("These notes have no slide cues. Open the teleprompter copy prepared for this deck.")
+                    .font(.callout).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Disconnect and read notes", action: model.disconnectAndReadNotes)
+                    .disabled(!model.canReplaceScript)
+            }
+            if model.canReadWithoutSlides {
+                Button("Read without slides", action: model.startWithoutSlides)
+                Text("Notes only. Slide cues stay off until you connect a deck.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             HStack {
                 if model.presentation.isConnected {
                     Button("Disconnect", action: model.disconnectSlides)
                     Button("Test next slide", action: model.testNextSlide)
                         .disabled(model.running || speech.isPreparing || model.slideBusy || model.presentation.isBusy)
-                } else {
+                } else if model.presentation.target == .powerpoint {
                     Button(model.presentation.connectLabel, action: model.connectSlides)
                         .disabled(model.running || speech.isPreparing || model.slideBusy || model.presentation.isBusy)
                 }
                 if model.slideBusy { ProgressView().controlSize(.small) }
             }
             if model.presentation.target == .brave {
+                Stepper("Notes start on slide \(model.scriptStartingSlide)", value: $model.scriptStartingSlide, in: 1...10_000)
+                    .disabled(!model.canReplaceScript)
+                Text("Click a word to move both notes and deck to that section. Each [[next-slide]] begins the next slide’s notes. For a partial script, set its starting slide above.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if !model.presentation.isConnected {
+                    Text("Open your deck in Brave → LocalPrompt Slides → Connect this deck. Pairing happens automatically here; reading stays paused.")
+                        .font(.callout).fixedSize(horizontal: false, vertical: true)
+                }
                 Button("Prepare Brave extension", action: model.presentation.prepareBrave)
                     .disabled(model.running || speech.isPreparing || model.presentation.isConnected || model.slideBusy || model.presentation.isBusy)
-                Text(model.presentation.setupMessage ?? "First time: prepare the Brave extension, then load its folder at brave://extensions. Start your Google Slides slideshow, click the LocalPrompt Slides extension → Connect this slideshow, then Connect Google Slides here.")
+                Text(model.presentation.setupMessage ?? "First time only: prepare the Brave extension, then load its folder at brave://extensions. After an update, prepare again and reload the extension there.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 Text("Use Sidecar as an extended display. Move LocalPrompt to the iPad and leave the slideshow on your Mac or projector. Cues do not switch focus.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -129,7 +176,7 @@ struct ContentView: View {
             }
             Text("Testing moves a real slide. After moving slides manually, align slides and notes, then reconnect. In Brave, select the slideshow again with the extension.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Text("Pause cancels queued changes. Seeking sends nothing and does not replay cues. Rewind starts a new cue pass and disconnects; return your deck to its starting slide, then reconnect.")
+            Text("Pause cancels queued changes. In Brave, clicking notes or moving ten words syncs the slide; jumping back rearms later cues. PowerPoint seeks move notes only. Rewind disconnects; return your deck to its starting slide, then reconnect.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
           }.padding(20)
         }.frame(width: 420, height: 580)
@@ -145,11 +192,24 @@ struct ContentView: View {
             TextField("Script title", text: $model.title)
                 .font(.system(size: 18, weight: .semibold)).textFieldStyle(.plain)
             HStack {
-                Button(action: model.openScript) { Label("Open", systemImage: "folder") }
+                Button(action: model.openScript) { Label("Open", systemImage: "folder") }.disabled(!model.canReplaceScript)
                 Button(action: model.exportScript) { Label("Export", systemImage: "square.and.arrow.up") }
                 Spacer()
                 Text("\(model.wordCount) words").font(.caption).foregroundStyle(.secondary)
             }.controlSize(.small)
+            HStack {
+                googleLinkButton
+                Spacer()
+            }.controlSize(.small)
+            if let source = model.linkedSermon {
+                HStack {
+                    Label("Obsidian copy", systemImage: "doc.text").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button(action: model.reloadSermon) { Label("Reload", systemImage: "arrow.clockwise") }
+                        .disabled(!model.canReplaceScript)
+                        .help("Reload \(source.name) from Obsidian. Current copy becomes the previous draft.")
+                }.controlSize(.small)
+            }
             TextEditor(text: $model.script)
                 .font(.system(size: 13)).lineSpacing(5)
                 .scrollContentBackground(.hidden)
@@ -158,7 +218,9 @@ struct ContentView: View {
                 .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.06)))
                 .accessibilityLabel("Script editor")
                 .frame(minHeight: 150)
-            Text("Paste or open TXT, Markdown, or RTF. Markdown renders in the prompter. Edits save automatically.")
+            Text(model.linkedSermon == nil
+                 ? "Paste or open TXT, Markdown, or RTF. Markdown renders in the prompter. Edits save automatically."
+                 : "Edits save in LocalPrompt only. Reload reads the latest Obsidian note. File → Restore Previous Draft undoes a load or reload.")
                 .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Divider().opacity(0.4)
             label("READING ROOM")
@@ -175,6 +237,28 @@ struct ContentView: View {
                 .background(.white.opacity(0.025), in: RoundedRectangle(cornerRadius: 8))
         }
         .padding(22).background(panel)
+    }
+
+    @ViewBuilder
+    private var googleLinkButton: some View {
+        Group {
+            if model.googleNoteLinks.count > 1 {
+                Menu {
+                    ForEach(Array(model.googleNoteLinks.enumerated()), id: \.element.id) { index, link in
+                        Button("\(index + 1). \(link.title)") { model.openGoogleLink(link) }
+                            .help(link.url.absoluteString)
+                    }
+                } label: { Label("Open in browser", systemImage: "arrow.up.right.square") }
+            } else {
+                Button {
+                    if let link = model.googleNoteLinks.first { model.openGoogleLink(link) }
+                } label: { Label("Open in browser", systemImage: "arrow.up.right.square") }
+            }
+        }
+        .disabled(model.googleNoteLinks.isEmpty || model.openingGoogleLink)
+        .help(model.googleNoteLinks.isEmpty
+              ? "No Google Slides, Sheets, Docs, or Drive link found in this note"
+              : "Open the linked Google file in Brave, or your default browser if Brave is not installed")
     }
 
     private var stage: some View {
@@ -219,6 +303,7 @@ struct ContentView: View {
                 Text("\(min(model.position, model.wordCount)) / \(model.wordCount)").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
                 ProgressView(value: model.progress).tint(mint).scaleEffect(y: 0.65)
                 Text("\(Int(model.progress * 100))%").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+                if showsSlideStatus { slideStatus }
             }.padding(.horizontal, 30).padding(.bottom, 16).padding(.top, 12)
             }
         }
@@ -227,24 +312,7 @@ struct ContentView: View {
     private var transport: some View {
         VStack(spacing: 0) {
             Divider().opacity(0.35)
-            if let error = speech.errorMessage {
-                HStack {
-                    Image(systemName: "exclamationmark.circle")
-                    Text(error).textSelection(.enabled)
-                    Spacer()
-                    Button("Dismiss") { speech.errorMessage = nil }
-                }.font(.system(size: 12)).foregroundStyle(.orange)
-                    .padding(12).background(.orange.opacity(0.07))
-            }
-            if let error = model.slideError {
-                HStack {
-                    Image(systemName: "exclamationmark.circle")
-                    Text(error).textSelection(.enabled)
-                    Spacer()
-                    Button("Dismiss") { model.slideError = nil }
-                }.font(.system(size: 12)).foregroundStyle(.orange)
-                    .padding(12).background(.orange.opacity(0.07))
-            }
+            transportNotices
             HStack(spacing: 18) {
                 VStack(alignment: .leading, spacing: 6) {
                     Picker("Mode", selection: $model.mode) {
@@ -265,32 +333,237 @@ struct ContentView: View {
                 Spacer(minLength: 0)
                 Button(action: model.rewind) { Image(systemName: "backward.end.fill") }.accessibilityLabel("Rewind").help("Rewind · ⇧⌘R")
                 Button { model.seek(model.position - 10) } label: { Image(systemName: "gobackward.10") }.accessibilityLabel("Back 10 words").help("Back 10 words · ⌘↑")
-                Button(action: model.toggle) {
-                    HStack(spacing: 8) {
-                        if speech.isPreparing { ProgressView().controlSize(.small) }
-                        else { Image(systemName: model.running ? "pause.fill" : "play.fill") }
-                        Text(speech.isPreparing ? "Cancel" : model.running ? "Pause" : "Start reading")
-                    }
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(canvas).frame(width: 140, height: 40)
-                    .background(mint, in: RoundedRectangle(cornerRadius: 10))
-                }.buttonStyle(.plain)
-                    .disabled(model.wordCount == 0 || (!model.running && (model.slideBusy || model.presentation.isBusy)))
-                    .help("Start / pause · ⌘Return")
+                readingButton
                 Button { model.seek(model.position + 10) } label: { Image(systemName: "goforward.10") }.accessibilityLabel("Forward 10 words").help("Forward 10 words · ⌘↓")
                 Spacer(minLength: 0)
                 VStack(alignment: .trailing, spacing: 7) {
                     Text(model.timeLabel).font(.system(size: 22, weight: .light, design: .monospaced))
-                    HStack(spacing: 3) {
-                        ForEach(0..<18) { index in
-                            Capsule().fill(speech.isRunning && speech.level > Double(index) / 18 ? mint : .white.opacity(0.1)).frame(width: 3, height: 7)
-                        }
-                    }.accessibilityLabel("Microphone level")
+                    microphoneMeter
                 }.frame(width: 90)
             }
             .buttonStyle(.borderless)
             .padding(.horizontal, 26).padding(.vertical, 19)
         }.background(panel)
+    }
+
+    /// Reserve space below the script so controls never cover readable words.
+    private var fullscreenTransport: some View {
+        VStack(spacing: 0) {
+            Divider().opacity(0.35)
+            transportNotices
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 16) {
+                    fullscreenSlideControls
+                    fullscreenSlideNavigation
+                    Spacer(minLength: 12)
+                    fullscreenPlayback
+                    Spacer(minLength: 12)
+                    fullscreenMatchButtons
+                    fullscreenTime
+                    exitFullscreenButton
+                }
+                // Sidecar can offer a narrow viewport. Keep touch targets intact.
+                VStack(spacing: 6) {
+                    HStack(spacing: 12) {
+                        fullscreenSlideControls
+                        Spacer(minLength: 8)
+                        fullscreenMatchButtons
+                        fullscreenTime
+                        exitFullscreenButton
+                    }
+                    HStack(spacing: 12) {
+                        fullscreenSlideNavigation
+                        Spacer(minLength: 8)
+                        fullscreenPlayback
+                    }
+                }
+            }
+            .buttonStyle(.borderless)
+            .padding(.horizontal, 20).padding(.vertical, 8)
+        }
+        .background(panel)
+        .popover(isPresented: $showSlideSettings, arrowEdge: .bottom) { slideSettings }
+    }
+
+    private var fullscreenSlideControls: some View {
+        Button {
+            if !showSlideSettings { model.captureSlideCueInsertionPoint() }
+            showSlideSettings.toggle()
+        } label: {
+            HStack(spacing: 9) {
+                VStack(alignment: .leading, spacing: 3) {
+                    if showsSlideStatus { slideStatus }
+                    else { Label("Slide cues", systemImage: "rectangle.on.rectangle") }
+                    Text(speech.isPreparing ? "Preparing microphone…" : model.running ? (model.mode == .voice ? "Listening" : "Steady pace") : "Paused")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+                Image(systemName: "chevron.up").font(.system(size: 9, weight: .semibold))
+            }.fixedSize().frame(minHeight: 44).contentShape(Rectangle())
+        }
+        .accessibilityLabel("Slide controls: \(showsSlideStatus ? slideStatusText : "Slide cues")")
+        .help("Slide connection and setup")
+    }
+
+    private var fullscreenPlayback: some View {
+        HStack(spacing: 8) {
+            Button { model.seek(model.position - 10) } label: {
+                Image(systemName: "gobackward.10").frame(width: 44, height: 44).contentShape(Rectangle())
+            }.accessibilityLabel("Back 10 words").help("Back 10 words · ⌘↑")
+                .disabled(model.slideBusy || model.presentation.isBusy || speech.isPreparing)
+            readingButton
+            Button { model.seek(model.position + 10) } label: {
+                Image(systemName: "goforward.10").frame(width: 44, height: 44).contentShape(Rectangle())
+            }.accessibilityLabel("Forward 10 words").help("Forward 10 words · ⌘↓")
+                .disabled(model.slideBusy || model.presentation.isBusy || speech.isPreparing)
+        }.fixedSize()
+    }
+
+    private var fullscreenSlideNavigation: some View {
+        HStack(spacing: 8) {
+            Button { model.moveSlide(by: -1) } label: {
+                Label("Previous slide", systemImage: "chevron.left")
+                    .frame(minHeight: 44).padding(.horizontal, 8).contentShape(Rectangle())
+            }
+            .accessibilityLabel("Previous slide")
+            .help("Previous slide in Brave; keep your place in the notes")
+            .disabled(!model.canMoveSlide(by: -1))
+            Button { model.moveSlide(by: 1) } label: {
+                HStack(spacing: 5) {
+                    Text("Next slide")
+                    Image(systemName: "chevron.right")
+                }.frame(minHeight: 44).padding(.horizontal, 8).contentShape(Rectangle())
+            }
+            .accessibilityLabel("Next slide")
+            .help("Next slide in Brave; keep your place in the notes")
+            .disabled(!model.canMoveSlide(by: 1))
+        }.font(.system(size: 12, weight: .medium)).fixedSize()
+    }
+
+    @ViewBuilder
+    private var fullscreenMatchButtons: some View {
+        if model.presentation.supportsManualSync && model.presentation.isConnected && !model.document.slideCues.isEmpty {
+            HStack(spacing: 12) {
+                Button { model.seek(model.position) } label: {
+                    Label("Match slide", systemImage: "arrow.triangle.2.circlepath")
+                        .fixedSize().frame(minHeight: 44).contentShape(Rectangle())
+                }.accessibilityLabel("Match slide to notes")
+                    .help("Move the connected deck to the slide for your current notes")
+                    .disabled(!model.canReplaceScript)
+                Button(action: model.matchNotesToSlide) {
+                    Label("Match notes", systemImage: "text.alignleft")
+                        .fixedSize().frame(minHeight: 44).contentShape(Rectangle())
+                }.accessibilityLabel("Match notes to slide")
+                    .help("Move the teleprompter to the beginning of the notes for the current slide")
+                    .disabled(!model.canMatchNotesToSlide)
+            }.font(.system(size: 12, weight: .medium))
+        }
+    }
+
+    private var fullscreenTime: some View {
+        VStack(alignment: .trailing, spacing: 5) {
+            Text(model.timeLabel).font(.system(size: 16, weight: .light, design: .monospaced))
+            microphoneMeter
+        }.frame(width: 70)
+    }
+
+    private var exitFullscreenButton: some View {
+        Button(action: windowState.exitFullScreen) {
+            Image(systemName: "arrow.down.right.and.arrow.up.left")
+                .frame(width: 44, height: 44).contentShape(Rectangle())
+        }.accessibilityLabel("Exit full screen").help("Exit full screen · Esc")
+    }
+
+    private var readingButton: some View {
+        Button(action: model.toggle) {
+            HStack(spacing: 8) {
+                if speech.isPreparing { ProgressView().controlSize(.small) }
+                else { Image(systemName: model.running ? "pause.fill" : "play.fill") }
+                Text(speech.isPreparing ? "Cancel" : model.running ? "Pause" : "Start reading")
+            }
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(canvas).frame(width: 140, height: 44)
+            .background(mint, in: RoundedRectangle(cornerRadius: 10))
+        }.buttonStyle(.plain)
+            .disabled(model.wordCount == 0 || (!model.running && (model.slideBusy || model.presentation.isBusy)))
+            .help("Start / pause · ⌘Return")
+    }
+
+    private var microphoneMeter: some View {
+        HStack(spacing: 2) {
+            ForEach(0..<18) { index in
+                Capsule().fill(speech.isRunning && speech.level > Double(index) / 18 ? mint : .white.opacity(0.1)).frame(width: 2, height: 7)
+            }
+        }.accessibilityLabel("Microphone level")
+            .accessibilityValue("\(Int(speech.level * 100)) percent")
+    }
+
+    @ViewBuilder
+    private var transportNotices: some View {
+        if let message = model.slideConnectionMessage {
+            HStack {
+                Image(systemName: "checkmark.circle")
+                Text(message)
+                Spacer()
+                if !windowState.isFullScreen && model.presentation.supportsManualSync && model.presentation.isConnected && !model.document.slideCues.isEmpty {
+                    Button("Match slide to notes") { model.seek(model.position) }
+                        .disabled(!model.canReplaceScript)
+                }
+            }.font(.system(size: 12)).foregroundStyle(mint)
+                .padding(12).background(mint.opacity(0.07))
+        }
+        if let error = speech.errorMessage {
+            HStack {
+                Image(systemName: "exclamationmark.circle")
+                Text(error).textSelection(.enabled)
+                Spacer()
+                Button("Dismiss") { speech.errorMessage = nil }
+            }.font(.system(size: 12)).foregroundStyle(.orange)
+                .padding(12).background(.orange.opacity(0.07))
+        }
+        if let error = model.slideError {
+            HStack {
+                Image(systemName: "exclamationmark.circle")
+                Text(error).textSelection(.enabled)
+                Spacer()
+                if model.canReadWithoutSlides {
+                    Button("Read without slides", action: model.startWithoutSlides)
+                }
+                if model.needsSlideCues {
+                    Button("Disconnect and read notes", action: model.disconnectAndReadNotes)
+                        .disabled(!model.canReplaceScript)
+                }
+                Button("Dismiss") { model.slideError = nil }
+            }.font(.system(size: 12)).foregroundStyle(.orange)
+                .padding(12).background(.orange.opacity(0.07))
+        }
+    }
+
+    private var showsSlideStatus: Bool {
+        !model.document.slideCues.isEmpty || model.presentation.isConnected
+    }
+
+    private var slideStatus: some View {
+        Label(slideStatusText, systemImage: model.presentation.isConnected ? "rectangle.on.rectangle" : "exclamationmark.circle")
+            .font(.system(size: 11, weight: .medium, design: .monospaced))
+            .foregroundStyle(slidesReady ? mint : .orange)
+            .fixedSize()
+            .accessibilityLabel(slideStatusText)
+    }
+
+    private var slidesReady: Bool {
+        model.presentation.isConnected && !model.document.slideCues.isEmpty
+    }
+
+    private var slideStatusText: String {
+        if model.readsWithoutSlides { return "Slides off · notes only" }
+        if model.slideBusy || model.presentation.isBusy { return "Slides · checking…" }
+        if !model.presentation.isConnected { return "Slides not connected" }
+        if model.document.slideCues.isEmpty { return "No slide cues in notes" }
+        if model.slideConnectionMessage != nil { return "Slides connected · reading paused" }
+        if let slide = model.presentation.currentSlidePosition, let total = model.presentation.totalSlides {
+            return "Slide \(slide) / \(total)"
+        }
+        return "Slides connected"
     }
 
     private func label(_ title: String) -> some View {

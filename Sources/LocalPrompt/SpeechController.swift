@@ -368,14 +368,6 @@ private final class AudioInputPump: @unchecked Sendable {
         guard converted.frameLength > 0, !isClosed else { return }
         continuation.yield(AnalyzerInput(buffer: converted))
         levelCounter += 1
-        if levelCounter % 4 == 0, let samples = converted.floatChannelData?[0] {
-            var squareSum = 0.0
-            let stride = converted.format.isInterleaved ? Int(converted.format.channelCount) : 1
-            for index in 0..<Int(converted.frameLength) {
-                let sample = Double(samples[index * stride])
-                squareSum += sample * sample
-            }
-            onLevel(min(1, sqrt(squareSum / Double(converted.frameLength)) * 6))
-        }
+        if levelCounter % 4 == 0 { onLevel(AudioLevel.meterValue(in: converted)) }
     }
 }

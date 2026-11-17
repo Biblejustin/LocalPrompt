@@ -46,8 +46,9 @@ public struct MarkdownDocument: Equatable, Sendable {
     /// Silent actions positioned after the preceding rendered spoken words.
     public let slideCues: [SlideCue]
 
-    public init(source: String) {
-        let prepared = Self.prepareCues(in: source)
+    public init(source: String, obsidian: Bool = false) {
+        let projection = obsidian ? ObsidianMarkdown.readingSource(source) : source
+        let prepared = Self.prepareCues(in: projection)
         let renderingSource = prepared.source
         guard let parsed = try? AttributedString(
             markdown: renderingSource,
